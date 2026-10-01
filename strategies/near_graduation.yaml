@@ -1,0 +1,27 @@
+id: near_graduation
+description: >
+  pump.fun tokens approaching graduation (bonding curve 75-97%) that are still rising.
+  Works on free snapshot prices (bonding % is derived from price) or the trade stream.
+universe: {pools: [pump], stage: curve, max_age_s: 7200}
+entry:
+  triggers: [curve_trade, enrichment, signal]
+  all:
+    - {id: bond, f: bonding_pct, op: between, v: [$min_bond, 97]}
+    - {id: rising, f: price_chg_300s_pct, op: ">", v: $min_rise}
+  none:
+    - {id: rug, f: hard_rug, op: "==", v: true, locked: true}
+    - {id: devdump, f: dev_sold_pct, op: ">", v: 50}
+sizing: {sol: 0.1, max_open: 5, max_entries_per_token: 1}
+exits:
+  take_profit: [{at_x: 1.6, sell_pct: 50}, {at_x: 3.0, sell_pct: 100}]
+  stop_loss_pct: $sl
+  trailing_pct: 25
+  trailing_activate_x: 1.3
+  max_hold_s: 1800
+  stale_after_s: 300
+  on_migration: hold
+  on_rug: true
+params:
+  min_bond: {value: 75, lo: 40, hi: 95}
+  min_rise: {value: 5, lo: -10, hi: 50}
+  sl: {value: 25, lo: 10, hi: 60}

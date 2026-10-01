@@ -1,0 +1,15 @@
+{
+  "frame": "42[\"tweet\",{\"id\":\"tw-valid\",\"text\":\"ape 4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi now xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"author\":{\"handle\":\"alice\",\"followersCount\":2500},\"isReply\":true,\"isRetweet\":false}]",
+  "tweet": {
+    "id": "tw-valid",
+    "text": "ape 4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi now xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "author": {
+      "handle": "alice",
+      "followersCount": 2500
+    },
+    "isReply": true,
+    "isRetweet": false
+  },
+  "text": "ape 4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi now xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "note": "RECONSTRUCTED / generic, not a live capture"
+}

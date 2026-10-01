@@ -1,0 +1,31 @@
+id: curve_momentum
+description: >
+  Early pump.fun bonding-curve momentum. Needs the PumpPortal trade stream for the token
+  (flow + holder features). Buys broad, organic demand (many distinct buyers, buy pressure),
+  no dev selling, holders not concentrated.
+universe: {pools: [pump], stage: curve, min_age_s: 15, max_age_s: 600}
+entry:
+  triggers: [curve_trade]
+  all:
+    - {id: uniq, f: unique_buyers_60s, op: ">=", v: $min_uniq}
+    - {id: bs, f: buy_sell_ratio_60s, op: ">=", v: $min_bs}
+    - {id: nodev, f: dev_sold, op: "==", v: false}
+    - {id: conc, f: top10_pct, op: "<", v: $max_top10}
+    - {id: notlate, f: bonding_pct, op: "<", v: 70}
+  none:
+    - {id: rug, f: hard_rug, op: "==", v: true, locked: true}
+sizing: {sol: 0.1, max_open: 5, max_entries_per_token: 1}
+exits:
+  take_profit: [{at_x: 2.0, sell_pct: 50}, {at_x: 4.0, sell_pct: 100}]
+  stop_loss_pct: $sl
+  trailing_pct: 30
+  trailing_activate_x: 1.5
+  max_hold_s: 900
+  stale_after_s: 180
+  on_dev_sell: true
+  on_rug: true
+params:
+  min_uniq: {value: 12, lo: 3, hi: 80, type: int}
+  min_bs: {value: 1.8, lo: 1.0, hi: 6.0}
+  max_top10: {value: 40, lo: 15, hi: 80}
+  sl: {value: 35, lo: 10, hi: 70}

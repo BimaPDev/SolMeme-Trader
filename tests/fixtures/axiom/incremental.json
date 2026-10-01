@@ -1,0 +1,21 @@
+{
+  "_note": "reconstructed type-1 incremental pulse frame [1, pairAddress, [[fieldIndex, value], ...]]",
+  "payload": [
+    1,
+    "GgBaCs3NCBuZN12kCJgAW63ydqohFkHEdfdEXBPzLHq",
+    [
+      [
+        26,
+        82
+      ],
+      [
+        19,
+        10
+      ],
+      [
+        13,
+        0.027
+      ]
+    ]
+  ]
+}

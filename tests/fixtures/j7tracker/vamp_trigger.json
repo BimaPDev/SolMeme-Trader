@@ -1,0 +1,5 @@
+{
+  "frame": "42[\"vamp_trigger\",{\"id\":\"vamp-1\",\"coinData\":{\"mint_address\":\"4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi\",\"name\":\"Cat Coin\",\"symbol\":\"CAT\",\"twitter\":\"https://x.com/alice\"}}]",
+  "update": "42[\"vamp_update_trigger\",{\"id\":\"vamp-2\",\"coinData\":{\"mint\":\"8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR\",\"name\":\"Dog\",\"symbol\":\"DOG\"}}]",
+  "note": "RECONSTRUCTED / generic, not a live capture"
+}

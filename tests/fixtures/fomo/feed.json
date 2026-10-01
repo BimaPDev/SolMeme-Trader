@@ -1,0 +1,31 @@
+{
+  "_note": "RECONSTRUCTED from itsnex1s/fomo-sdk (sanitized shape, not a live capture).",
+  "responseObject": {
+    "items": [
+      {
+        "type": "multi_user_buy",
+        "networkId": 1399811149,
+        "tokenAddress": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+        "userId": "u1",
+        "id": "agg-buy",
+        "body": {"humanUsdAmount": 500, "userCount": 4}
+      },
+      {
+        "type": "multi_user_sell",
+        "networkId": 1399811149,
+        "tokenAddress": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+        "userId": "u1",
+        "id": "agg-sell",
+        "body": {"humanUsdAmount": 400, "userCount": 3}
+      },
+      {
+        "type": "swap_buy",
+        "tokenAddress": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+        "userId": "u1",
+        "id": "feed-buy-u1",
+        "symbol": "OTTR",
+        "body": {"networkId": 1399811149, "humanUsdAmount": 64, "ticker": "OTTR"}
+      }
+    ]
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "_note": "reconstructed camelCase /pulse token object",
+  "url": "https://api.axiom.trade/pulse",
+  "tokenAddress": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+  "pairAddress": "GgBaCs3NCBuZN12kCJgAW63ydqohFkHEdfdEXBPzLHq",
+  "tokenTicker": "DEMO",
+  "protocol": "Pump",
+  "devHoldsPercent": 0.027,
+  "snipersHoldPercent": 16.64,
+  "top10HoldersPercent": 22.5,
+  "insidersHoldPercent": 3.0,
+  "bundlersHoldPercent": 4.0,
+  "liquiditySol": 4.0,
+  "marketCapSol": 25.0,
+  "volumeSol": 3.5,
+  "bondingCurvePercent": 40,
+  "numHolders": 42,
+  "numTradingBotUsers": 6,
+  "website": "https://example.com",
+  "twitter": "https://x.com/demo",
+  "telegram": "https://t.me/demo"
+}

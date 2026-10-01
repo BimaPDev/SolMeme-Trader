@@ -1,0 +1,19 @@
+{
+  "_note": "RECONSTRUCTED from itsnex1s/fomo-sdk (sanitized shape, not a live capture).",
+  "responseObject": {
+    "leaderboard": [
+      {
+        "id": "u1",
+        "address": "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+        "userHandle": "moon_otter",
+        "rank": 1
+      },
+      {
+        "id": "u2",
+        "address": "QWmroo4YnnMqYW3cnxWkFdaTxGD3P7vMSzwMHGbUzwF",
+        "userHandle": "pixel_monk",
+        "rank": 2
+      }
+    ]
+  }
+}

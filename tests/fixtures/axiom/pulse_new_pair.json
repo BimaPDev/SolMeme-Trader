@@ -1,0 +1,39 @@
+{
+  "_note": "reconstructed update_pulse_v2 row; bonding 20 is a new pair; index 3 is the dev address",
+  "room": "update_pulse_v2",
+  "content": [
+    [
+      "GgBaCs3NCBuZN12kCJgAW63ydqohFkHEdfdEXBPzLHq",
+      "8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR",
+      null,
+      "CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8",
+      null,
+      null,
+      null,
+      "Pump",
+      null,
+      "https://example.com",
+      "https://x.com/demo",
+      "https://t.me/demo",
+      null,
+      16.64,
+      0.027,
+      8.0,
+      3.0,
+      4.0,
+      2.5,
+      40.0,
+      null,
+      5.0,
+      null,
+      null,
+      null,
+      null,
+      20,
+      null,
+      100,
+      7,
+      null
+    ]
+  ]
+}

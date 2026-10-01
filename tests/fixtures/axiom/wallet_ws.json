@@ -1,0 +1,13 @@
+{
+  "_note": "reconstructed tracked-wallet room v:<wallet> content dict",
+  "room": "v:LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+  "content": {
+    "type": "buy",
+    "maker_address": "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+    "tokenAddress": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+    "total_sol": 1.5,
+    "total_usd": 210.0,
+    "tokenTicker": "DEMO",
+    "signature": "axiomwallettx1"
+  }
+}

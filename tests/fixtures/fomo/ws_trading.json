@@ -1,0 +1,13 @@
+{
+  "_note": "RECONSTRUCTED from itsnex1s/fomo-sdk (sanitized shape, not a live capture).",
+  "type": "data",
+  "topicType": "trading_activity",
+  "payload": {
+    "type": "swap_buy",
+    "tokenAddress": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+    "userId": "u1",
+    "id": "ws-buy-u1",
+    "symbol": "OTTR",
+    "body": {"networkId": 1399811149, "humanUsdAmount": 80}
+  }
+}

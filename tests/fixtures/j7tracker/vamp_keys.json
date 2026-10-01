@@ -1,0 +1,11 @@
+{
+  "frames": {
+    "mint_address": "42[\"vamp_trigger\",{\"id\":\"vamp-mint_address\",\"coinData\":{\"mint_address\":\"4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi\",\"name\":\"Cat\",\"symbol\":\"CAT\"}}]",
+    "mint": "42[\"vamp_trigger\",{\"id\":\"vamp-mint\",\"coinData\":{\"mint\":\"  4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi  \",\"name\":\"Cat\",\"symbol\":\"CAT\"}}]",
+    "contractAddress": "42[\"vamp_trigger\",{\"id\":\"vamp-contractAddress\",\"coinData\":{\"contractAddress\":\"4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi\",\"name\":\"Cat\",\"symbol\":\"CAT\"}}]",
+    "tokenAddress": "42[\"vamp_trigger\",{\"id\":\"vamp-tokenAddress\",\"coinData\":{\"tokenAddress\":\"4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi\",\"name\":\"Cat\",\"symbol\":\"CAT\"}}]",
+    "address": "42[\"vamp_trigger\",{\"id\":\"vamp-address\",\"coinData\":{\"address\":\"4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi\",\"name\":\"Cat\",\"symbol\":\"CAT\"}}]",
+    "sourceMint": "42[\"vamp_trigger\",{\"id\":\"vamp-sourceMint\",\"coinData\":{\"sourceMint\":\"4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi\",\"name\":\"Cat\",\"symbol\":\"CAT\"}}]"
+  },
+  "note": "RECONSTRUCTED / generic, not a live capture"
+}

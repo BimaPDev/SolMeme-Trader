@@ -1,0 +1,28 @@
+id: migration_momentum
+description: >
+  Freshly migrated tokens (PumpSwap/Raydium) with strong DexScreener buy pressure and real
+  liquidity. Uses free DexScreener snapshots.
+universe: {stage: migrated, max_age_s: 86400}
+entry:
+  triggers: [enrichment, migration, pool_trade]
+  all:
+    - {id: fresh, f: since_migration_s, op: "<", v: $max_since_mig}
+    - {id: buyp, f: dex_buy_ratio_m5, op: ">=", v: $min_buy_ratio}
+    - {id: vol, f: dex_volume_m5_usd, op: ">=", v: $min_vol_m5}
+    - {id: liq, f: dex_liquidity_usd, op: ">=", v: 15000}
+  none:
+    - {id: rug, f: hard_rug, op: "==", v: true, locked: true}
+sizing: {sol: 0.1, max_open: 5, max_entries_per_token: 1}
+exits:
+  take_profit: [{at_x: 1.5, sell_pct: 50}, {at_x: 3.0, sell_pct: 100}]
+  stop_loss_pct: $sl
+  trailing_pct: 20
+  trailing_activate_x: 1.3
+  max_hold_s: 3600
+  stale_after_s: 600
+  on_rug: true
+params:
+  max_since_mig: {value: 1800, lo: 120, hi: 7200}
+  min_buy_ratio: {value: 1.3, lo: 1.0, hi: 4.0}
+  min_vol_m5: {value: 20000, lo: 1000, hi: 200000}
+  sl: {value: 25, lo: 10, hi: 60}

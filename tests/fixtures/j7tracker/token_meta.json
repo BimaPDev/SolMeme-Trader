@@ -1,0 +1,7 @@
+{
+  "frame": "42[\"token_meta\",{\"id\":\"meta-1\",\"tokenMeta\":{\"mint\":\"4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi\",\"chain\":\"sol\",\"symbol\":\"PEPE\",\"marketCapUsd\":125000,\"liquidityUsd\":8000}}]",
+  "default_chain": "42[\"token_meta\",{\"id\":\"meta-default\",\"tokenMeta\":{\"mint\":\"8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR\",\"symbol\":\"DOG\"}}]",
+  "solana_chain": "42[\"token_meta\",{\"id\":\"meta-solana\",\"tokenMeta\":{\"mint\":\"4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi\",\"chain\":\"Solana\",\"symbol\":\"PEPE\"}}]",
+  "ethereum": "42[\"token_meta\",{\"id\":\"meta-eth\",\"tokenMeta\":{\"mint\":\"4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi\",\"chain\":\"ETH\",\"symbol\":\"PEPE\"}}]",
+  "note": "RECONSTRUCTED / generic, not a live capture"
+}

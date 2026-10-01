@@ -1,0 +1,39 @@
+{
+  "_note": "reconstructed update_pulse_v2 row; protocol Pump AMM is migrated",
+  "room": "update_pulse_v2",
+  "content": [
+    [
+      "GgBaCs3NCBuZN12kCJgAW63ydqohFkHEdfdEXBPzLHq",
+      "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+      null,
+      "CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8",
+      null,
+      null,
+      null,
+      "Pump AMM",
+      null,
+      "https://example.com",
+      "https://x.com/demo",
+      "https://t.me/demo",
+      null,
+      16.64,
+      0.027,
+      8.0,
+      3.0,
+      4.0,
+      2.5,
+      40.0,
+      null,
+      5.0,
+      null,
+      null,
+      null,
+      null,
+      40,
+      null,
+      100,
+      7,
+      null
+    ]
+  ]
+}

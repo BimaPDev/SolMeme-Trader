@@ -1,0 +1,33 @@
+{
+  "_note": "RECONSTRUCTED from itsnex1s/fomo-sdk (sanitized shape, not a live capture).",
+  "type": "data",
+  "topicType": "trending_tokens",
+  "payload": {
+    "kind": "snapshot",
+    "tokens": [
+      {
+        "token": {
+          "address": "0x4200000000000000000000000000000000000006",
+          "networkId": 8453,
+          "symbol": "WETH"
+        },
+        "holders": 999,
+        "marketCap": 1000000000,
+        "volume24": 50000000,
+        "liquidity": 8000000
+      },
+      {
+        "token": {
+          "address": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+          "networkId": 1399811149,
+          "symbol": "OTTR"
+        },
+        "holders": 88,
+        "marketCap": 250000,
+        "volume24": 12000,
+        "liquidity": 40000,
+        "uniqueTraders": 17
+      }
+    ]
+  }
+}

@@ -1,0 +1,30 @@
+id: trench_quality
+description: >
+  GMGN trenches 'New' tokens with healthy holder structure and smart-money interest
+  (all free GMGN snapshot features; Axiom-Pulse-style filter).
+universe: {stage: any, max_age_s: 1800}
+entry:
+  triggers: [enrichment, signal]
+  all:
+    - {id: listed, f: trench_new, op: "==", v: true}
+    - {id: holders, f: gmgn_holders, op: ">=", v: $min_holders}
+    - {id: conc, f: gmgn_top10_pct, op: "<", v: $max_top10}
+    - {id: smart, f: gmgn_smart_degen_count, op: ">=", v: $min_smart}
+    - {id: rugr, f: gmgn_rug_ratio, op: "<", v: 0.3}
+  none:
+    - {id: rug, f: hard_rug, op: "==", v: true, locked: true}
+    - {id: bundled, f: gmgn_bundler_rate, op: ">", v: 0.3}
+sizing: {sol: 0.1, max_open: 6, max_entries_per_token: 1}
+exits:
+  take_profit: [{at_x: 2.0, sell_pct: 50}, {at_x: 4.0, sell_pct: 100}]
+  stop_loss_pct: $sl
+  trailing_pct: 30
+  trailing_activate_x: 1.6
+  max_hold_s: 2400
+  stale_after_s: 300
+  on_rug: true
+params:
+  min_holders: {value: 60, lo: 10, hi: 500, type: int}
+  max_top10: {value: 35, lo: 10, hi: 80}
+  min_smart: {value: 1, lo: 0, hi: 10, type: int}
+  sl: {value: 35, lo: 10, hi: 70}

@@ -1,0 +1,150 @@
+# SolMeme-Trader settings. Secrets live in .env, everything tunable lives here.
+
+data_dir: data
+strategies_dir: strategies
+
+record:
+  # PumpPortal per-token trade streams are billed (~0.01 SOL per 10k events). New launches and
+  # migrations are free. Trade streams go to the highest-priority watchlist tokens until this
+  # many trade events per UTC day; after that only held tokens stay subscribed. 0 = unlimited.
+  trade_stream_daily_events: 30000
+  # Every new launch stays on the watchlist this long: polled for free via DexScreener batch
+  # (price, 5-min txns/volume) and — lowest priority — eligible for paid trade streams.
+  watch_launch_window_s: 600
+  # How long a token stays on the watchlist after its last interesting event.
+  watch_ttl_s: 1800
+  # Keep tracking a token this long after we exit (post-exit path → "sold too early?").
+  post_exit_track_s: 1800
+  # Hard cap on simultaneous tokenTrade subscriptions on the single PumpPortal socket.
+  max_subscriptions: 300
+  retention_days: 30
+
+sources:
+  pumpportal:
+    enabled: true
+    url: wss://pumpportal.fun/api/data
+  gmgn:
+    enabled: true            # needs GMGN_API_KEY (free at gmgn.ai/ai); skipped otherwise
+    rate_per_s: 2.0          # free tier is a small leaky bucket — stay well under it
+    trenches_poll_s: 10      # New / Almost / Migrated snapshots (holders, top10, smart money, rug ratio…)
+    trench_limit: 80
+    trench_types: [new_creation, near_completion, completed]
+    wallet_feeds: [smartmoney, kol]   # public smart-money / KOL trade feeds
+    wallet_feed_poll_s: 15
+    tracked_wallet_poll_s: 30         # for sources.tracked_wallets (GMGN wallet_activity)
+    security_max_per_min: 20          # token security lookups for watchlist tokens
+  dexscreener:
+    enabled: true
+    boosts_poll_s: 60        # paid boosts / profiles → dex_paid signal
+    watch_poll_s: 5          # batch price/liquidity/txns for watchlist tokens (30 per request)
+    max_requests_per_min: 240
+  jupiter:
+    enabled: true
+    sol_price_poll_s: 60     # CoinGecko by default; Jupiter Price v3 if JUPITER_API_KEY is set
+  rugcheck:
+    enabled: false
+  # Wallets you want to follow directly (KOLs, smart money). Streamed via PumpPortal accountTrade.
+  tracked_wallets: []
+  # Platforms without an official data API. They run a real Chromium with a saved login
+  # (`solmeme login <site>` once) and listen to the traffic the web app receives.
+  # Use a throwaway account — automated access is against these sites' terms. NEVER connect a
+  # funded wallet or paste a private key into these browser profiles.
+  axiom: {enabled: false, headless: true}
+  fomo: {enabled: true, headless: true}
+  j7tracker: {enabled: true, headless: true}
+
+# Execution realism for paper fills. Pessimistic defaults; tune against live data later.
+fills:
+  latency_ms: [400, 1500]        # uniform signal→land delay; fill uses the market state at land time
+  slippage_tolerance_pct: 25     # buy fails if landed price is this much worse than the signal price
+  sell_slippage_tolerance_pct: 50
+  sell_max_retries: 3            # after this many failed sells, the next one lands at any price
+  fail_rate: 0.10                # random tx failure (dropped / expired); bots fail far more than humans
+  priority_fee_sol: 0.001        # paid on every attempt, success or failure (+ 5000 lamports base)
+  jito_tip_sol: 0.0005           # paid only on landed txs
+  platform_fee_pct: 0.5          # execution venue fee per leg (PumpPortal local 0.5%, GMGN/Lightning 1%)
+  ata_rent_sol: 0.00204          # token account rent on first buy, refunded when the position closes
+  curve_fee_pct: 1.25            # pump.fun bonding-curve fee (0.95% protocol + 0.30% creator)
+  # PumpSwap fees step down with market cap (SOL). Approximate tiers: [max_mcap_sol, fee_pct]
+  amm_fee_tiers: [[420, 1.25], [2000, 0.95], [20000, 0.60], [98240, 0.45], [1.0e12, 0.30]]
+  sandwich_prob: 0.15            # share of buys that get sandwiched ...
+  sandwich_extra_pct: 3.0        # ... and land this much worse (capped at the slippage limit)
+  stale_exit_haircut_pct: 30     # forced exit with no fresh price: haircut vs last known price
+
+portfolio:
+  starting_sol: 10.0
+  max_position_sol: 1.0          # hard cap; AI proposals can never exceed it
+  daily_loss_limit_sol: 3.0      # strategy stops opening new positions for the UTC day
+
+# Hard-coded global filter: tokens failing these are never evaluated by any strategy (and never
+# reach the AI). Same rule syntax as strategies. Free, deterministic, runs on every event.
+prefilter:
+  enabled: true
+  all:
+    - {id: has_price, f: secs_since_price, op: "<", v: 300}      # no decisions on stale data
+  none:
+    - {id: rug, f: hard_rug, op: "==", v: true}                  # honeypot / blacklist / extreme concentration
+    - {id: gmgn_rug, f: gmgn_rug_ratio, op: ">", v: 0.6}
+    - {id: dev_dumped, f: dev_sold_pct, op: ">", v: 80}
+    - {id: whale_top1, f: top1_pct, op: ">", v: 50}
+    - {id: crashed, f: dd_from_ath_pct, op: ">", v: 85}
+
+ai:
+  # Claude is never in the trading path. It only reviews strategies, and only when the free
+  # deterministic triage below finds something actionable — otherwise the review is skipped ($0).
+  triage:
+    min_trades: 15
+    healthy_expectancy_pct: 15
+    min_feature_auc_edge: 0.12
+    near_miss_2x_share: 0.35
+    early_exit_share: 0.30
+    rug_hit_rate: 0.10
+    fee_drag_share: 0.35
+  provider: claude               # claude | openai_compat | hermes_ssh
+  model: claude-opus-5-5
+  effort: high
+  max_tokens: 16000
+  daily_budget_usd: 5.0
+  review_every_trades: 40        # inside `run`: review a strategy after this many new closed trades
+  review_every_hours: 12
+  max_proposals_per_review: 3
+  max_challengers_per_strategy: 3
+  # pricing used for cost accounting ($ per 1M tokens)
+  price_in: 4.0
+  price_out: 20.0
+  price_cache_read: 0.20
+  price_cache_write: 5.0
+  openai_compat:
+    base_url: https://api.deepseek.com/v1
+    model: deepseek-chat
+    key_env: DEEPSEEK_KEY
+  hermes_ssh:
+    host: ""
+    port: 22
+    user: hermes
+    key_path: ""
+    bin_path: hermes
+    workdir: "~"
+
+promotion:
+  review_window_days: 3          # recorded data used per review (evidence + holdout)
+  holdout_frac: 0.3              # newest share of that window the AI never sees (backtest gate)
+  min_backtest_trades: 20
+  min_expectancy_delta_sol: 0.0  # challenger expectancy must beat champion by more than this
+  max_dd_tolerance: 1.2          # challenger max DD may be at most 1.2x champion's
+  min_shadow_trades: 30
+  max_shadow_hours: 72
+  bootstrap_conf: 0.90
+  bootstrap_iters: 2000
+
+# Paper-only online learning. The sniper never sends a transaction.
+sniper:
+  enabled: true
+  decision_s: 12          # score a launch this many seconds after creation
+  horizon_s: 600          # label: did it 2x before -50% inside this window
+  explore: true           # occasionally paper-buy a near-miss so the model keeps learning
+
+excluded_mints:
+  - So11111111111111111111111111111111111111112
+  - EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
+  - Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB

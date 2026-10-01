@@ -1,0 +1,7 @@
+{
+  "quoted_and_card": "42[\"tweet\",{\"id\":\"nested-1\",\"text\":\"quoting this\",\"author\":{\"handle\":\"alice\",\"followersCount\":20},\"isReply\":true,\"isRetweet\":false,\"quotedTweet\":{\"id\":\"q1\",\"text\":\"ape 4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi\"},\"replyTo\":{\"id\":\"r0\",\"text\":\"earlier thought\"},\"card\":{\"url\":\"https://pump.fun/coin/8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR\",\"title\":\"Card\",\"description\":\"desc\"},\"tweetUrl\":\"https://x.com/alice/status/99\"}]",
+  "reply_to": "42[\"tweet\",{\"id\":\"nested-reply\",\"text\":\"thanks\",\"author\":{\"handle\":\"alice\"},\"isReply\":true,\"replyTo\":{\"id\":\"r1\",\"text\":\"the ca is 8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR\"}}]",
+  "tweet_url": "42[\"tweet\",{\"id\":\"nested-url\",\"text\":\"see profile\",\"author\":\"alice\",\"tweetUrl\":\"https://solscan.io/token/4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi\"}]",
+  "card_title_description": "42[\"tweet\",{\"id\":\"nested-card\",\"text\":\"look\",\"author\":{\"handle\":\"alice\"},\"card\":{\"url\":\"https://example.com/nope\",\"title\":\"4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi\",\"description\":\"also 8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR\"}}]",
+  "note": "RECONSTRUCTED / generic, not a live capture"
+}

@@ -1,0 +1,22 @@
+{
+  "frame": "42[\"initialTweets\",[{\"id\":\"init-1\",\"text\":\"one 4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi\",\"author\":{\"handle\":\"ann\",\"followersCount\":100}},{\"id\":\"init-2\",\"text\":\"two 4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi\",\"author\":{\"handle\":\"ben\",\"followersCount\":4000}}]]",
+  "payload": [
+    {
+      "id": "init-1",
+      "text": "one 4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+      "author": {
+        "handle": "ann",
+        "followersCount": 100
+      }
+    },
+    {
+      "id": "init-2",
+      "text": "two 4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+      "author": {
+        "handle": "ben",
+        "followersCount": 4000
+      }
+    }
+  ],
+  "note": "RECONSTRUCTED / generic, not a live capture"
+}

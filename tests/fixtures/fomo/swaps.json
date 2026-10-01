@@ -1,0 +1,102 @@
+{
+  "_note": "RECONSTRUCTED from itsnex1s/fomo-sdk (sanitized shape, not a live capture).",
+  "responseObject": {
+    "swaps": [
+      {
+        "id": "buy-w1",
+        "signature": "sig-buy-w1",
+        "userId": "u1",
+        "address": "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+        "recipient": "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+        "inNetworkId": 1399811149,
+        "outNetworkId": 1399811149,
+        "inTokenAddress": "So11111111111111111111111111111111111111112",
+        "outTokenAddress": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+        "humanUsdAmountIn": 42.5,
+        "humanUsdAmountOut": 5,
+        "inHumanAmount": 0.21,
+        "outHumanAmount": 1000000
+      },
+      {
+        "id": "dust",
+        "signature": "sig-dust",
+        "userId": "u1",
+        "address": "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+        "recipient": "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+        "inNetworkId": 1399811149,
+        "outNetworkId": 1399811149,
+        "inTokenAddress": "So11111111111111111111111111111111111111112",
+        "outTokenAddress": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+        "humanUsdAmountIn": 5,
+        "inHumanAmount": 0.02
+      },
+      {
+        "id": "stranger",
+        "signature": "sig-stranger",
+        "userId": "u3",
+        "address": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "recipient": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx",
+        "inNetworkId": 1399811149,
+        "outNetworkId": 1399811149,
+        "inTokenAddress": "So11111111111111111111111111111111111111112",
+        "outTokenAddress": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+        "humanUsdAmountIn": 80
+      },
+      {
+        "id": "cross-robinhood",
+        "signature": "sig-cross-robinhood",
+        "userId": "u1",
+        "address": "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+        "recipient": "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+        "inNetworkId": 1399811149,
+        "outNetworkId": 4663,
+        "inTokenAddress": "So11111111111111111111111111111111111111112",
+        "outTokenAddress": "0x4200000000000000000000000000000000000006",
+        "humanUsdAmountIn": 90
+      },
+      {
+        "id": "quote",
+        "signature": "sig-quote",
+        "userId": "u1",
+        "address": "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+        "recipient": "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+        "inNetworkId": 1399811149,
+        "outNetworkId": 1399811149,
+        "inTokenAddress": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "outTokenAddress": "So11111111111111111111111111111111111111112",
+        "humanUsdAmountIn": 100,
+        "humanUsdAmountOut": 100
+      },
+      {
+        "id": "sell-w1",
+        "signature": "sig-sell-w1",
+        "userId": "u1",
+        "address": "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+        "recipient": "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+        "inNetworkId": 1399811149,
+        "outNetworkId": 1399811149,
+        "inTokenAddress": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+        "outTokenAddress": "So11111111111111111111111111111111111111112",
+        "humanUsdAmountIn": 5,
+        "humanUsdAmountOut": 55,
+        "inHumanAmount": 500000,
+        "outHumanAmount": 0.33
+      },
+      {
+        "id": "buy-w1-dup",
+        "signature": "sig-buy-w1",
+        "userId": "u1",
+        "address": "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+        "recipient": "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY",
+        "inNetworkId": 1399811149,
+        "outNetworkId": 1399811149,
+        "inTokenAddress": "So11111111111111111111111111111111111111112",
+        "outTokenAddress": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+        "humanUsdAmountIn": 42.5,
+        "humanUsdAmountOut": 5,
+        "inHumanAmount": 0.21,
+        "outHumanAmount": 1000000
+      }
+    ]
+  }
+}

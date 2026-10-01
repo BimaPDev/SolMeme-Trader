@@ -1,0 +1,24 @@
+{
+  "_note": "reconstructed new_pairs room object (snake_case field names)",
+  "room": "new_pairs",
+  "content": {
+    "token_address": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi",
+    "pair_address": "GgBaCs3NCBuZN12kCJgAW63ydqohFkHEdfdEXBPzLHq",
+    "token_ticker": "DEMO",
+    "protocol": "Pump",
+    "dev_holds_percent": 0.027,
+    "snipers_hold_percent": 16.64,
+    "top_10_holders": 22.5,
+    "insiders_hold_percent": 3.0,
+    "bundlers_hold_percent": 4.0,
+    "initial_liquidity_sol": 4.0,
+    "market_cap_sol": 25.0,
+    "volume_sol": 3.5,
+    "bondingCurvePercent": 20,
+    "numHolders": 42,
+    "numTradingBotUsers": 6,
+    "website": "https://example.com",
+    "twitter": "https://x.com/demo",
+    "telegram": "https://t.me/demo"
+  }
+}

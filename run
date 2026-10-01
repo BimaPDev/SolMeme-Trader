@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Start the paper trader, or print the boards.
+#
+#   ./run                 paper trade, plus boards and wallet search every 10 min
+#   ./run boards          Trenches, Trending, CopyTrade, pump.fun, and a card per buy
+#   ./run people          rank wallets that are buying now
+#   ./run people NAME     look up a wallet by name or address
+#   ./run setup           save API keys into .env (Enter keeps a key already there)
+#   ./run check           test each data source
+#   ./run report          write data/reports/
+#   ./run <anything else> passed straight to the solmeme command
+set -euo pipefail
+cd "$(dirname "$0")"
+
+solmeme=".venv/bin/solmeme"
+if [[ ! -x "$solmeme" ]]; then
+  echo "No virtualenv yet. From this folder:"
+  echo "  uv venv && uv pip install -e ."
+  exit 1
+fi
+
+cmd="${1:-paper}"
+case "$cmd" in
+  paper)
+    shift || true
+    exec "$solmeme" run --no-ai "$@"
+    ;;
+  boards)
+    shift
+    exec "$solmeme" boards "$@"
+    ;;
+  people)
+    shift
+    exec "$solmeme" people "$@"
+    ;;
+  setup)
+    shift
+    exec "$solmeme" setup "$@"
+    ;;
+  -h|--help|help)
+    sed -n '2,11p' "$0"
+    ;;
+  *)
+    exec "$solmeme" "$@"
+    ;;
+esac
