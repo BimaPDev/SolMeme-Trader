@@ -12,8 +12,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import subprocess
 import sys
 import time
+from collections import deque
 
 import httpx
 from rich.console import Console
@@ -101,7 +103,7 @@ def load_platform(name: str):
 class LiveSession:
     def __init__(self, settings: Settings, store: Store | None, specs: list[tuple[StrategySpec, str]] | None,
                  console: Console | None = None, warmup_min: float = 45.0, ai: bool = False,
-                 ai_every_s: float = 600):
+                 ai_every_s: float = 600, ui: str = "normal"):
         self.settings = settings
         self.store = store
         self.console = console or Console()
@@ -138,6 +140,15 @@ class LiveSession:
         self._last_ai = time.time() - ai_every_s + 120   # first AI cycle ~2 min after start
         self.ctx: Context | None = None
         self.pp: PumpPortal | None = None
+        self.ui = ui
+        self.hub = None
+        self._httpd = None
+        self._tui_proc = None
+        self.boards_snap = None
+        self.people_cards: list = []
+        self.feed: deque = deque(maxlen=40)
+        self.scan_note = ""
+        self._last_publish = 0.0
 
     def _warmup(self, minutes: float) -> None:
         """Rebuild market + positions by replaying the recent log through the same engine."""
@@ -177,6 +188,8 @@ class LiveSession:
                 now = max(time.time(), self.last_ts)
                 self.engine.advance(now)
                 self.last_ts = now
+            if self.hub is not None and time.time() - self._last_publish >= 1:
+                self.publish()
 
     async def _manage(self) -> None:
         last_status = time.time()
@@ -202,6 +215,7 @@ class LiveSession:
                 await self._one_scan()
             except Exception as exc:  # noqa: BLE001
                 log.warning("scan failed: %s", exc)
+                self.scan_note = str(exc)
                 self.console.print(f"[yellow]boards/people scan failed[/yellow] {exc}")
             await asyncio.sleep(max(30.0, 600 - (time.time() - started)))
 
@@ -228,6 +242,10 @@ class LiveSession:
 
         req = Gmgn(self.ctx)._req if available() else None
         snap = await snapshot(req, now=time.time(), max_cards=4, fetch_html=fetch_html, pump_get=pump_get)
+        self.boards_snap = snap
+        self.people_cards = []
+        self.scan_note = ""
+        self.publish()
         self.console.print("\n[bold]Boards[/bold]")
         _print_boards(snap)
         out = self.settings.data_dir / "boards"
@@ -239,6 +257,8 @@ class LiveSession:
             return
         followed = set(self.settings.sources.tracked_wallets)
         cards = await discover(req, limit=5, followed=followed)
+        self.people_cards = cards
+        self.publish()
         self.console.print(f"\n[bold]People[/bold]  {len(cards)} scored  ·  paper only")
         for card in cards:
             color = {"copy": "green", "watch": "yellow", "skip": "red"}.get(card["verdict"], "white")
@@ -353,12 +373,41 @@ class LiveSession:
             )
         self.console.print(table)
 
+    def publish(self) -> None:
+        if self.hub is None:
+            return
+        from solmeme.ui.snapshot import build_snapshot
+
+        self.hub.update(build_snapshot(self))
+        self._last_publish = time.time()
+
+    async def _watch_tui(self) -> None:
+        proc = self._tui_proc
+        while proc is not None and proc.poll() is None:
+            await asyncio.sleep(0.4)
+
+    def _shutdown_ui(self) -> None:
+        proc = self._tui_proc
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            self._tui_proc = None
+        httpd = self._httpd
+        if httpd is not None:
+            self._httpd = None
+            httpd.shutdown()
+            httpd.server_close()
+
     def _on_snipe(self, card, action, score) -> None:
         from rich.markup import escape
 
         label = action.upper()
         color = {"BUY": "green", "EXPLORE": "yellow", "SKIP": "dim"}.get(label, "white")
         sym = card.symbol or "?"
+        self.feed.append(f"snipe {label} {sym} {card.mint[:6]} {score:.2f} {card.note}")
         self.console.print(
             f"snipe [{color}]{label}[/{color}] {escape(sym)} {escape(card.mint[:6])} {score:.2f} {escape(card.note)}"
         )
@@ -370,20 +419,38 @@ class LiveSession:
             tasks = [asyncio.create_task(s.run()) for s in sources]
             tasks += [asyncio.create_task(self._consume()), asyncio.create_task(self._tick()),
                       asyncio.create_task(self._manage()), asyncio.create_task(self._scans())]
+            waiters: list[asyncio.Task] = []
             try:
                 if minutes:
-                    await asyncio.sleep(minutes * 60)
+                    waiters.append(asyncio.create_task(asyncio.sleep(minutes * 60)))
                 else:
-                    await asyncio.gather(*tasks)
+                    waiters.append(asyncio.create_task(asyncio.gather(*tasks)))
+                if self._tui_proc is not None:
+                    waiters.append(asyncio.create_task(self._watch_tui()))
+                await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
             finally:
-                for t in tasks:
+                for t in tasks + waiters:
                     t.cancel()
-                await asyncio.gather(*tasks, return_exceptions=True)
-                self.writer.close()
-                if self.sniper:
-                    self.sniper.flush(self.last_ts or time.time(), force=False)
-                if self.engine is not None:
-                    self.engine.finish(close_open=False)
-                    if self.store and self.run_id:
-                        self.store.end_run(self.run_id)
+                # Save before awaiting anything: closing browsers/sockets can take a few
+                # seconds, and a second Ctrl+C during that wait must not lose data.
+                self._save()
+                self.console.print("[dim]saved. closing connections… (Ctrl+C again to force quit)[/dim]")
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*tasks, *waiters, return_exceptions=True), 15,
+                    )
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    pass
                 self.print_status()
+                self._shutdown_ui()
+
+    def _save(self) -> None:
+        """Flush everything to disk. Synchronous on purpose (no await = can't be interrupted
+        by the event loop). Open positions are restored next start by the warm-start replay."""
+        self.writer.close()
+        if self.sniper:
+            self.sniper.flush(self.last_ts or time.time(), force=False)
+        if self.engine is not None:
+            self.engine.finish(close_open=False)
+            if self.store and self.run_id:
+                self.store.end_run(self.run_id)

@@ -1,7 +1,12 @@
-"""Append-only event log: data/events/YYYYMMDD/HH.jsonl.gz (UTC), one event per line.
+"""Append-only event log: data/events/YYYYMMDD/HH-<session>.jsonl.gz (UTC), one event per line.
 
 This is the source of truth for replay/backtests. Files are written in receive
-order, so reading them in path order yields a time-ordered stream.
+order, so reading them in (hour, session) order yields a time-ordered stream.
+
+Each run writes its own files (the session id is its start time in ms). A run that
+is killed mid-write leaves a truncated gzip, and gzip can't read past a truncated
+member — so if runs shared a file, one crash would silently hide every later run's
+events in that hour. Older single-file hours (HH.jsonl.gz) are still read.
 """
 
 from __future__ import annotations
@@ -9,6 +14,7 @@ from __future__ import annotations
 import gzip
 import io
 import time
+import zlib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterator
@@ -16,14 +22,22 @@ from typing import Iterator
 from solmeme.core.events import dump_event, parse_event
 
 
-def _hour_path(root: Path, ts: float) -> Path:
+def _hour_path(root: Path, ts: float, session: str) -> Path:
     dt = datetime.fromtimestamp(ts, tz=timezone.utc)
-    return root / dt.strftime("%Y%m%d") / f"{dt.strftime('%H')}.jsonl.gz"
+    return root / dt.strftime("%Y%m%d") / f"{dt.strftime('%H')}-{session}.jsonl.gz"
+
+
+def _sort_key(f: Path) -> tuple:
+    """(day, hour, session) — legacy HH.jsonl.gz files sort first within their hour."""
+    stem = f.name.split(".", 1)[0]
+    hour, _, session = stem.partition("-")
+    return f.parent.name, hour, int(session) if session.isdigit() else -1
 
 
 class EventLogWriter:
     def __init__(self, root: Path, flush_every_s: float = 2.0):
         self.root = root
+        self.session = f"{int(time.time() * 1000):013d}"
         self.flush_every_s = flush_every_s
         self._path: Path | None = None
         self._fh: io.TextIOWrapper | None = None
@@ -31,7 +45,7 @@ class EventLogWriter:
         self.count = 0
 
     def write(self, ev) -> None:
-        path = _hour_path(self.root, ev.ts)
+        path = _hour_path(self.root, ev.ts, self.session)
         if path != self._path:
             self._open(path)
         assert self._fh is not None
@@ -60,7 +74,7 @@ class EventLogWriter:
 def list_files(root: Path, start: float | None = None, end: float | None = None) -> list[Path]:
     if not root.exists():
         return []
-    files = sorted(root.glob("*/*.jsonl.gz"))
+    files = sorted(root.glob("*/*.jsonl.gz"), key=_sort_key)
     if start is None and end is None:
         return files
     out = []
@@ -94,7 +108,7 @@ def read_events(root: Path, start: float | None = None, end: float | None = None
                     if end is not None and ev.ts > end:
                         return
                     yield ev
-        except (EOFError, OSError):
+        except (EOFError, OSError, zlib.error):
             # a file still being written (or truncated by a crash) — keep what we read
             continue
 
@@ -122,7 +136,7 @@ def read_events_file(f: Path) -> Iterator:
                         yield parse_event(line)
                     except Exception:
                         continue
-    except (EOFError, OSError):
+    except (EOFError, OSError, zlib.error):
         return
 
 

@@ -19,7 +19,9 @@ solmeme --data-dir data-demo review --dry-run --days 1 # see triage + the exact 
 
 # 2. Real market
 solmeme check                                          # test every source and key
-solmeme run                                            # live paper trading (+ scheduled AI cycles)
+solmeme run                                            # live paper trading, rich log
+solmeme run --ui tui                                   # same session, Bubble Tea full-screen UI
+solmeme run --ui web                                   # same session at http://127.0.0.1:8787
 solmeme report                                         # data/reports/YYYY-MM-DD.md
 ```
 

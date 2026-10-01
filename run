@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Start the paper trader, or print the boards.
 #
-#   ./run                 paper trade, plus boards and wallet search every 10 min
+#   ./run                 paper trade, rich log (the normal UI)
+#   ./run tui             same session in a Bubble Tea full-screen UI
+#   ./run web             same session, site at http://127.0.0.1:8787
 #   ./run boards          Trenches, Trending, CopyTrade, pump.fun, and a card per buy
 #   ./run people          rank wallets that are buying now
 #   ./run people NAME     look up a wallet by name or address
@@ -21,9 +23,11 @@ fi
 
 cmd="${1:-paper}"
 case "$cmd" in
-  paper)
+  paper|tui|web)
+    ui=normal
+    if [[ "$cmd" == "tui" || "$cmd" == "web" ]]; then ui="$cmd"; fi
     shift || true
-    exec "$solmeme" run --no-ai "$@"
+    exec "$solmeme" run --no-ai --ui "$ui" "$@"
     ;;
   boards)
     shift

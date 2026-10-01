@@ -5,7 +5,7 @@
   people [QUERY]            find wallets to paper-copy, or look one up by name or address
   setup                     ask for API keys once and save them in .env
   record                    ingest + event log only
-  run                       live paper trading (champions + challengers) with scheduled AI cycles
+  run [--ui normal|tui|web] live paper trading. normal is the rich log; tui is Bubble Tea; web is localhost
   snipe                     paper launch sniper (live, or --replay over the event log)
   snipe-report              what the sniper has learned: working bins, failing bins, recent decisions
   backtest                  replay recorded data through every active strategy version
@@ -433,20 +433,48 @@ def record(minutes: Optional[float] = typer.Option(None, help="Stop after N minu
 @app.command()
 def run(minutes: Optional[float] = typer.Option(None, help="Stop after N minutes"),
         ai: bool = typer.Option(True, "--ai/--no-ai", help="Schedule AI cycles (shadow gate + reviews)"),
-        warmup_min: float = typer.Option(45, help="Rebuild state by replaying the last N minutes of the log")):
+        warmup_min: float = typer.Option(45, help="Rebuild state by replaying the last N minutes of the log"),
+        ui: str = typer.Option("normal", "--ui", help="normal (rich log), tui (Bubble Tea), or web (localhost)")):
     """Live paper trading: record + run every champion and challenger on the same stream."""
     from solmeme.ai.promoter import active_specs
     from solmeme.sim.live import LiveSession
 
+    ui = ui.lower()
+    if ui not in ("normal", "tui", "web"):
+        console.print("[red]--ui must be normal, tui, or web[/red]")
+        raise typer.Exit(1)
     s, store = _ctx()
     specs = active_specs(store)
-    console.print(f"[bold]paper trading[/bold] {len(specs)} strategy versions: "
-                  + ", ".join(f"{sp.key} ({lbl})" for sp, lbl in specs))
-    console.print("[dim]also scanning boards and wallets, then again every 10 min[/dim]")
+    out = console
+    log_file = None
+    if ui == "tui":
+        from solmeme.config import ROOT
+        logs = ROOT / "logs"
+        logs.mkdir(exist_ok=True)
+        log_file = open(logs / "tui-session.log", "a", encoding="utf-8")
+        logging.basicConfig(level=logging.WARNING, force=True, stream=log_file,
+                            format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+        out = Console(file=log_file, force_terminal=False, highlight=False)
+    summary = (f"[bold]paper trading[/bold] {len(specs)} strategy versions: "
+               + ", ".join(f"{sp.key} ({lbl})" for sp, lbl in specs))
+    out.print(summary)
+    out.print("[dim]also scanning boards and wallets, then again every 10 min[/dim]")
+    session = LiveSession(s, store, specs, out, warmup_min=warmup_min, ai=ai, ui=ui)
     try:
-        asyncio.run(LiveSession(s, store, specs, console, warmup_min=warmup_min, ai=ai).run(minutes))
+        if ui != "normal":
+            from solmeme.ui.launch import UiError, attach
+            try:
+                attach(session, ui)
+            except UiError as exc:
+                console.print(f"[red]{exc}[/red]")
+                session.writer.close()
+                raise typer.Exit(1)
+        asyncio.run(session.run(minutes))
     except KeyboardInterrupt:
         pass
+    finally:
+        if log_file is not None:
+            log_file.close()
 
 
 @app.command()
