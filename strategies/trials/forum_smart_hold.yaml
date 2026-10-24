@@ -1,0 +1,26 @@
+id: forum_smart_hold
+description: >
+  Paper trial. The public copy-trade ladder (r/SolanaMemeCoins, Sep 2025, and
+  Cielo's default): require several tracked wallets, sell half at 2x, cut near
+  -30%, and do not dump the position just because one of those wallets sells.
+  Stricter than kol_follow (3 wallets, smaller cap, no sell-on-their-sell).
+  Own wallet only.
+universe: {stage: any, max_age_s: 21600}
+entry:
+  triggers: [wallet_trade]
+  all:
+    - {id: kols, f: kol_buys_600s, op: ">=", v: 3}
+    - {id: small, f: mcap_sol, op: "<", v: 800}
+    - {id: fresh, f: secs_since_first_kol, op: "<", v: 600}
+  none:
+    - {id: rug, f: hard_rug, op: "==", v: true, locked: true}
+    - {id: dumped, f: kol_sells, op: ">=", v: 2}
+sizing: {sol: 0.1, max_open: 4, max_entries_per_token: 1}
+exits:
+  take_profit: [{at_x: 2.0, sell_pct: 50}, {at_x: 4.0, sell_pct: 100}]
+  stop_loss_pct: 30
+  max_hold_s: 3600
+  stale_after_s: 600
+  on_kol_sell: false
+  on_rug: true
+params: {}

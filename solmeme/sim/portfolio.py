@@ -35,16 +35,32 @@ class Position:
     selling: bool = False            # a sell order is in flight
 
 
-class Portfolio:
+class Account:
+    """SOL cash. Every strategy's Portfolio can draw on one Account to trade a shared wallet."""
+
     def __init__(self, starting_sol: float):
         self.starting_sol = starting_sol
         self.cash = starting_sol
+
+
+class Portfolio:
+    def __init__(self, starting_sol: float, account: Account | None = None):
+        self.starting_sol = starting_sol
+        self.account = account or Account(starting_sol)
         self.positions: dict[str, Position] = {}
         self.realized = 0.0
         self.day_pnl: dict[str, float] = {}
         self.closed = 0
         self.wins = 0
         self.fees = 0.0
+
+    @property
+    def cash(self) -> float:
+        return self.account.cash
+
+    @cash.setter
+    def cash(self, value: float) -> None:
+        self.account.cash = value
 
     def charge(self, sol: float) -> None:
         """Costs of failed attempts (priority fee etc.)."""

@@ -181,6 +181,104 @@ async def _recent_buys(req, wallet: str) -> dict:
     return found.get(wallet) or {"wallet": wallet, "labels": set(), "buys": 0, "usd": 0.0, "symbols": []}
 
 
+class TraderBook:
+    """Traders seen on the fomo leaderboard or in recorded trades. No GMGN calls."""
+
+    def __init__(self):
+        self._rows: dict[str, dict] = {}
+
+    def _slot(self, wallet: str, rank: int | None = None) -> dict:
+        slot = self._rows.get(wallet)
+        if slot is None:
+            slot = {
+                "wallet": wallet, "handle": "", "labels": set(), "buys": 0, "sells": 0,
+                "usd": 0.0, "symbols": [], "rank": 10_000, "on_board": False,
+            }
+            self._rows[wallet] = slot
+        if rank is not None:
+            slot["rank"] = rank
+        return slot
+
+    def add_leaderboard(self, traders: list[dict] | None) -> None:
+        present: set[str] = set()
+        for i, row in enumerate(traders or []):
+            if not isinstance(row, dict):
+                continue
+            wallet = str(row.get("address") or row.get("wallet") or "")
+            if not wallet:
+                continue
+            slot = self._slot(wallet, i)
+            handle = str(row.get("handle") or "").lstrip("@")
+            if handle:
+                slot["handle"] = handle
+            slot["labels"].add("fomo")
+            slot["on_board"] = True
+            present.add(wallet)
+        for wallet, slot in self._rows.items():
+            if wallet not in present:
+                slot["on_board"] = False
+
+    def add_tracked(self, wallets: list[str] | None) -> None:
+        for wallet in wallets or []:
+            wallet = str(wallet or "").strip()
+            if wallet:
+                self._slot(wallet)["labels"].add("tracked")
+
+    def add_trade(self, wallet: str, side: str, usd: float | None = None, symbol: str = "", label: str = "") -> None:
+        if not wallet or wallet == "unknown":
+            return
+        slot = self._slot(wallet)
+        if label:
+            slot["labels"].add(label)
+        if side == "buy":
+            slot["buys"] += 1
+            if usd:
+                slot["usd"] += float(usd)
+            if symbol and symbol not in slot["symbols"]:
+                slot["symbols"].append(symbol)
+        elif side == "sell":
+            slot["sells"] += 1
+
+    def cards(self, *, limit: int = 8) -> list[dict]:
+        rows = [
+            row for row in self._rows.values()
+            if row["on_board"] or row["buys"] or row["sells"] or "tracked" in row["labels"]
+        ]
+        rows.sort(key=lambda r: (-r["usd"], -r["buys"], r["rank"]))
+        out = []
+        for row in rows[:limit]:
+            handle = row["handle"]
+            wallet = row["wallet"]
+            head = f"{handle}  {wallet}" if handle else wallet
+            lines = [head, "verdict: watch"]
+            if row["buys"] or row["usd"] or row["sells"]:
+                bits = []
+                labels = sorted(row["labels"])
+                if labels:
+                    bits.append(",".join(labels))
+                if row["buys"]:
+                    bits.append(f"{row['buys']} buys")
+                if row["sells"]:
+                    bits.append(f"{row['sells']} sells")
+                if row["usd"]:
+                    bits.append(f"${row['usd']:,.0f}")
+                lines.append(" · ".join(bits))
+                if row["symbols"]:
+                    lines.append("recent: " + ", ".join(row["symbols"][:6]))
+            elif "fomo" in row["labels"]:
+                lines.append("fomo leaderboard")
+            else:
+                lines.append("tracked")
+            out.append({"wallet": wallet, "verdict": "watch", "text": "\n".join(lines)})
+        return out
+
+
+def fomo_cards(traders: list[dict] | None, *, limit: int = 8) -> list[dict]:
+    book = TraderBook()
+    book.add_leaderboard(traders)
+    return book.cards(limit=limit)
+
+
 async def discover(req, *, limit: int = 8, followed: set[str] | None = None) -> list[dict]:
     followed = followed or set()
     kol = await req("GET", KOL_PATH, {"chain": "sol", "limit": 50})

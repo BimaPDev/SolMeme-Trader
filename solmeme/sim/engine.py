@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import heapq
 import itertools
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -21,12 +22,13 @@ from solmeme.config import Settings
 from solmeme.features.registry import FeatureView
 from solmeme.features.token_state import MarketState
 from solmeme.sim.fills import Fill, FillModel, order_rng
-from solmeme.sim.portfolio import Portfolio, Position
-from solmeme.strategy.dsl import evaluate, in_universe
+from solmeme.sim.portfolio import Account, Portfolio, Position
+from solmeme.strategy.dsl import evaluate, in_universe, max_score, score, score_terms
 from solmeme.strategy.spec import Cond, StrategySpec
 
 CHECK_EVERY_S = 10.0
 NEAR_MISS_TRACK_S = 1800.0
+SHADOW_LABELS = ("challenger", "candidate", "trial", "swarm")   # paper-only: own wallet, never the shared one
 
 
 @dataclass
@@ -41,6 +43,20 @@ class Order:
     attempt: int = 0
     n: int = 0
     features: dict = field(default_factory=dict)
+    why: list = field(default_factory=list)
+    size_mult: float = 1.0          # the whale boost applied to this buy (1 = normal size)
+
+
+TAPE_SIZE = 500
+
+
+def _short(v) -> str:
+    if isinstance(v, bool) or v is None:
+        return str(v).lower()
+    if isinstance(v, (int, float)):
+        a = abs(v)
+        return f"{v:,.0f}" if a >= 100 else f"{v:.2f}" if a >= 1 else f"{v:.3g}"
+    return str(v)
 
 
 @dataclass
@@ -58,11 +74,11 @@ class Tracker:
 
 
 class Runner:
-    def __init__(self, spec: StrategySpec, starting_sol: float, label: str = ""):
+    def __init__(self, spec: StrategySpec, starting_sol: float, label: str = "", account: Account | None = None):
         self.spec = spec
         self.key = spec.key
         self.label = label                      # champion | challenger | candidate
-        self.portfolio = Portfolio(starting_sol)
+        self.portfolio = Portfolio(starting_sol, account)
         self.entries: dict[str, int] = {}
         self.pending_buys: set[str] = set()
         self.near_missed: set[str] = set()
@@ -72,32 +88,39 @@ class Runner:
 
 
 class Journal:
-    """In-memory sink. Persisting to SQLite is optional (live/backtest runs)."""
+    """In-memory sink. Persisting to SQLite is optional (live/backtest runs).
+
+    Rows stamped at or before `persist_after` stay in memory only: a live warm start replays
+    the previous session's log, and that session already journaled those trades."""
 
     def __init__(self, store=None, run_id: str | None = None):
         self.store, self.run_id = store, run_id
+        self.persist_after = float("-inf")
         self.trades: list[dict] = []
         self.orders: list[dict] = []
         self.near_misses: list[dict] = []
 
+    def _persist(self, ts: float | None) -> bool:
+        return bool(self.store) and (ts is None or ts > self.persist_after)
+
     def trade(self, row: dict) -> None:
         self.trades.append(row)
-        if self.store:
+        if self._persist(row.get("exit_ts")):
             self.store.insert_trade({**row, "run_id": self.run_id})
 
     def update_trade(self, row: dict) -> None:
         # row is the same dict already in self.trades (mutated in place)
-        if self.store:
+        if self._persist(row.get("exit_ts")):
             self.store.insert_trade({**row, "run_id": self.run_id})
 
     def order(self, row: dict) -> None:
         self.orders.append(row)
-        if self.store:
+        if self._persist(row.get("ts")):
             self.store.insert_order({**row, "run_id": self.run_id})
 
     def near_miss(self, row: dict) -> None:
         self.near_misses.append(row)
-        if self.store:
+        if self._persist(row.get("ts")):
             self.store.insert_near_miss({**{k: row[k] for k in (
                 "strategy_id", "version", "mint", "ts", "failed_rule", "price", "mcap_sol")}, "run_id": self.run_id})
 
@@ -105,22 +128,33 @@ class Journal:
 class Engine:
     def __init__(self, specs: list[tuple[StrategySpec, str]], settings: Settings, journal: Journal | None = None,
                  seed: int = 7, record_near_misses: bool = True, snapshot_features: bool = True,
-                 activity=None):
+                 activity=None, shared_wallet: bool = False):
         self.settings = settings
+        # shared_wallet: every runner spends from one Account instead of its own starting_sol
+        self.account = Account(settings.portfolio.starting_sol) if shared_wallet else None
         self.market = MarketState(excluded=set(settings.excluded_mints))
-        self.fills = FillModel(settings.fills)
+        calib = None
+        if settings.fills.calibrate_from_live:           # paper fills corrected by the live dry run's measurements
+            from solmeme.sim.calibration import load as load_calibration
+            calib = load_calibration(settings.data_dir)
+        self.fills = FillModel(settings.fills, calib)
         self.journal = journal or Journal()
         self.seed = seed
         self.record_near_misses = record_near_misses
         self.snapshot_features = snapshot_features
         self.activity = activity
-        self.runners: list[Runner] = [Runner(s, settings.portfolio.starting_sol, lbl) for s, lbl in specs]
+        self.wallet_epoch = 0                     # bumps each time the shared wallet is restarted
+        self.entries_after = float("-inf")       # live sets this so a restart doesn't buy stale warm-start signals
+        self.runners: list[Runner] = [Runner(s, settings.portfolio.starting_sol, lbl, self._account_for(lbl))
+                                     for s, lbl in specs]
         self._timers: list = []
         self._tseq = itertools.count()
         self.now = 0.0
         self.trackers: dict[str, list[Tracker]] = {}
+        self.tape: deque = deque(maxlen=TAPE_SIZE)   # every fill, newest last: the live trades view
         self.events = 0
         self.hooks: list = []
+        self.fill_listeners: list = []          # live only: fn(tape item) for each new fill (the dry-run wallet)
         pf = settings.prefilter
         self.prefilter_all = [Cond(**c) for c in pf.all] if pf.enabled else []
         self.prefilter_none = [Cond(**c) for c in pf.none] if pf.enabled else []
@@ -212,8 +246,15 @@ class Engine:
 
     # ── entries ────────────────────────────────────────────────────────────
     def _can_enter(self, r: Runner, mint: str, now: float) -> bool:
-        if r.label == "retired":
+        if r.label == "retired" or now < self.entries_after:
             return False
+        if r.label in SHADOW_LABELS and self.in_shared_wallet(r):
+            return False                    # demoted mid-run: winds down its shared positions first
+        if (self.settings.portfolio.one_position_per_token and self.account is not None
+                and r.portfolio.account is self.account):
+            for x in self.runners:          # another champion already holds (or is buying) it in the shared wallet
+                if x is not r and x.portfolio.account is self.account and (mint in x.portfolio.positions or mint in x.pending_buys):
+                    return False
         if mint in r.portfolio.positions or mint in r.pending_buys:
             return False
         if r.entries.get(mint, 0) >= r.spec.sizing.max_entries_per_token:
@@ -224,18 +265,83 @@ class Engine:
             return False
         return True
 
-    def _size(self, r: Runner) -> float:
-        want = float(r.spec.p(r.spec.sizing.sol))
-        size = min(want, self.settings.portfolio.max_position_sol, r.portfolio.cash - 0.05)
+    @staticmethod
+    def boost(r: Runner, fv: FeatureView | None) -> float:
+        """The whale boost for this buy: sizing.boost_x when enough trusted whales bought lately, else 1."""
+        z = r.spec.sizing
+        if fv is None:
+            return 1.0
+        mult = 1.0
+        if z.boost_whales and (fv.get("whale_buys") or 0) >= z.boost_whales:
+            mult = max(1.0, z.boost_x)
+        e = r.spec.entry
+        if z.score_x and e.score and e.min_score is not None:      # more conviction, bigger bet
+            lo, hi = float(r.spec.p(e.min_score)), max_score(r.spec)
+            frac = min(1.0, max(0.0, (score(r.spec, fv) - lo) / (hi - lo))) if hi > lo else 0.0
+            mult *= 1 + (max(1.0, z.score_x) - 1) * frac
+        return round(mult, 3)
+
+    def _size(self, r: Runner, mult: float = 1.0) -> float:
+        pf = self.settings.portfolio
+        pct = r.spec.sizing.pct if r.spec.sizing.pct is not None else pf.position_pct
+        want = pct / 100 * self.equity_sol(r) if pct else float(r.spec.p(r.spec.sizing.sol))
+        size = min(want * mult, pf.max_position_sol, r.portfolio.cash - pf.reserve_sol)
         return size if size >= 0.01 else 0.0
 
+    def held_sol_of(self, pos) -> float:
+        """What one open position would return if sold at the current market."""
+        st = self.market.get(pos.mint)
+        if st is None or pos.tokens <= 0:
+            return 0.0
+        got = self.fills.liquidation_value(st, pos.tokens)
+        if got is None and st.price_sol:
+            got = pos.tokens * st.price_sol
+        return got or 0.0
+
+    def held_sol(self, r: Runner) -> float:
+        """What a runner's open positions would return if sold at the current market."""
+        total = 0.0
+        for mint, pos in r.portfolio.positions.items():
+            if pos.tokens <= 0:
+                continue
+            st = self.market.get(mint)
+            if st is None:
+                continue
+            got = self.fills.liquidation_value(st, pos.tokens)
+            if got is None and st.price_sol:
+                got = pos.tokens * st.price_sol
+            if got is not None:
+                total += got
+        return total
+
+    def shared_breakdown(self) -> dict | None:
+        """The shared wallet split into cash, open positions at market, and their cost basis."""
+        if self.account is None:
+            return None
+        mine = [x for x in self.runners if x.portfolio.account is self.account]
+        held = sum(self.held_sol(x) for x in mine)
+        open_cost = sum(p.cost_sol - p.proceeds_sol for x in mine for p in x.portfolio.positions.values() if p.tokens > 0)
+        return {"cash": self.account.cash, "held": held, "open_cost": open_cost, "start": self.account.starting_sol}
+
+    def equity_sol(self, r: Runner) -> float:
+        """The value of the wallet r trades from: cash plus every open position drawing on it."""
+        account = r.portfolio.account
+        return account.cash + sum(self.held_sol(x) for x in self.runners if x.portfolio.account is account)
+
     def _place_buy(self, r: Runner, st, now: float, fv: FeatureView) -> None:
-        size = self._size(r)
+        mult = self.boost(r, fv)
+        size = self._size(r, mult)
         if size <= 0:
             return
         n = next(r.order_n)
+        why = [f"{c.f} {_short(fv.get(c.f))}" for c in [*r.spec.entry.all, *r.spec.entry.any]][:6]
+        if r.spec.entry.score:
+            why.append(f"score {score(r.spec, fv):g}/{max_score(r.spec):g}: " + ", ".join(score_terms(r.spec, fv)[:8]))
+        if mult > 1:
+            why.append(f"{mult:g}x bet" + (f": {fv.get('whale_buys')} whale(s) in" if r.spec.sizing.boost_whales
+                                           and (fv.get("whale_buys") or 0) >= r.spec.sizing.boost_whales else ": high score"))
         o = Order("buy", st.mint, st.price_sol, now, sol=size, reason="entry", n=n,
-                  features=fv.snapshot() if self.snapshot_features else {})
+                  features=fv.snapshot() if self.snapshot_features else {}, why=why, size_mult=mult)
         r.pending_buys.add(st.mint)
         r.entries[st.mint] = r.entries.get(st.mint, 0) + 1
         rng = order_rng(self.seed, r.key, st.mint, n)
@@ -253,6 +359,7 @@ class Engine:
             r.portfolio.charge(f.cost_sol)
             r.failed_buy_cost += f.cost_sol
             r.failed_buys += 1
+            self._tape(r, "missed", o.mint, st.symbol, due, sol=o.sol, why=[f.reason])
             return
         pos = Position(
             trade_id=f"{r.key}:{o.mint}:{o.n}", mint=o.mint, symbol=st.symbol, entry_ts=due,
@@ -265,13 +372,28 @@ class Engine:
                         decided_ts=o.decided_ts, ref_price=o.ref_price, sandwiched=f.meta.get("sandwiched"))],
         )
         r.portfolio.open(pos, f.sol, f.cost_sol)
+        self._tape(r, "buy", o.mint, st.symbol, due, sol=pos.cost_sol, price=f.price, why=o.why,
+                   tokens=f.tokens, ref_price=o.ref_price, swap_sol=f.sol, size_mult=o.size_mult,
+                   whales=(o.features or {}).get("whale_buys"))
         self.schedule(due + CHECK_EVERY_S, lambda t, r=r, mint=o.mint, tid=pos.trade_id: self._check(r, mint, tid, t))
 
     def _swap_fee(self, st) -> float:
         c = self.settings.fills
-        return (c.amm_fee_pct(st.mcap_sol) if st.migrated else c.curve_fee_pct) / 100
+        return (c.amm_fee_pct(st.mcap_sol) if st.migrated else c.curve_fee(st.pool)) / 100
 
     # ── exits ──────────────────────────────────────────────────────────────
+    def restore_position(self, r: Runner, data: dict) -> bool:
+        """Put back a position saved before a restart: same trade, same exits, managed from now on.
+        Cash is not touched (the caller restores the wallet's cash as it was)."""
+        if data.get("tokens", 0) <= 0 or data["mint"] in r.portfolio.positions:
+            return False
+        fields = {k: data[k] for k in Position.__dataclass_fields__ if k in data}
+        pos = Position(**{**fields, "selling": False})
+        r.portfolio.positions[pos.mint] = pos
+        r.entries[pos.mint] = r.entries.get(pos.mint, 0) + 1
+        self.schedule(self.now + CHECK_EVERY_S, lambda t, r=r, mint=pos.mint, tid=pos.trade_id: self._check(r, mint, tid, t))
+        return True
+
     def _check(self, r: Runner, mint: str, trade_id: str, now: float) -> None:
         pos = r.portfolio.positions.get(mint)
         if pos is None or pos.trade_id != trade_id:
@@ -371,6 +493,9 @@ class Engine:
         r.portfolio.reduce(pos.mint, f.tokens, f.sol, f.cost_sol)
         if reason.startswith("tp") and pos.tokens > 1e-6:
             pos.tp_done += 1
+            self._tape(r, "sell", pos.mint, pos.symbol or (st.symbol if st else ""), ts, sol=f.sol, price=f.price,
+                       why=[reason], x=f.price / pos.entry_price if pos.entry_price else None, partial=True,
+                       frac=f.tokens / (f.tokens + pos.tokens) if f.tokens + pos.tokens > 0 else 1.0)
             return
         if pos.tokens > pos.initial_tokens * 1e-6 and not reason.startswith("tp"):
             # partial dust left from rounding: dump it with this exit
@@ -395,11 +520,27 @@ class Engine:
             fills=pos.fills,
         )
         self.journal.trade(row)
+        last_sol = float(pos.fills[-1].get("sol") or 0.0) if pos.fills and pos.fills[-1].get("side") == "sell" else 0.0
+        self._tape(r, "sell", pos.mint, row["symbol"], ts, sol=last_sol,
+                   price=exit_price, why=[reason], x=exit_price / pos.entry_price if pos.entry_price else None,
+                   pnl_sol=pnl, pnl_pct=row["pnl_pct"], hold_s=row["hold_s"], frac=1.0, trade_id=pos.trade_id)
         tr = Tracker("post_exit", pos.mint, st.price_sol if st and st.price_sol else exit_price, ts,
                      ts + self.settings.record.post_exit_track_s, {"row": row})
         tr.max_p = tr.min_p = tr.ref_price
         self.trackers.setdefault(pos.mint, []).append(tr)
         self.schedule(tr.end_ts, lambda t, tr=tr: self._finish_tracker(tr))
+
+    def _tape(self, r: Runner, side: str, mint: str, symbol: str, ts: float, **kw) -> None:
+        if ts <= self.journal.persist_after:      # a warm start replaying the last session: not new trades
+            return
+        item = dict(ts=ts, side=side, key=r.key, role=r.label, shared=self.in_shared_wallet(r),
+                    mint=mint, symbol=symbol or "", **kw)
+        self.tape.append(item)
+        for fn in self.fill_listeners:
+            try:
+                fn(item)
+            except Exception:  # noqa: BLE001 - a listener never breaks trading
+                pass
 
     # ── trackers (post-exit path, near-miss outcomes) ──────────────────────
     def _near_miss(self, r: Runner, st, now: float, failed_rule: str) -> None:
@@ -410,6 +551,12 @@ class Engine:
         tr.max_p = tr.min_p = st.price_sol
         self.trackers.setdefault(st.mint, []).append(tr)
         self.schedule(tr.end_ts, lambda t, tr=tr: self._finish_tracker(tr))
+
+    def live_near_misses(self) -> list[dict]:
+        """Near-misses still being followed, oldest first. The journal only gets each one NEAR_MISS_TRACK_S
+        later, with its outcome, so anything showing what is close to a buy right now must read these."""
+        rows = [tr.payload["row"] for trs in list(self.trackers.values()) for tr in list(trs) if tr.kind == "near_miss"]
+        return sorted(rows, key=lambda r: r["ts"])
 
     def _update_trackers(self, st, now: float) -> None:
         trs = self.trackers.get(st.mint)
@@ -438,19 +585,54 @@ class Engine:
             self.journal.near_miss(row)
 
     # ── lifecycle ──────────────────────────────────────────────────────────
+    def fresh_wallet_sol(self) -> float:
+        """portfolio.starting_usd at the current SOL price (or the configured SOL amount)."""
+        pf = self.settings.portfolio
+        px = self.market.sol_usd
+        return pf.starting_usd / px if pf.starting_usd and px else pf.starting_sol
+
+    def _account_for(self, label: str) -> Account | None:
+        """The shared wallet, except for versions on trial: a challenger runs on its own copy
+        of the starting wallet, so a shadow test never spends (or doubles up in) the real one.
+        None means the Runner opens its own Account."""
+        return None if label in SHADOW_LABELS else self.account
+
+    def in_shared_wallet(self, r: Runner) -> bool:
+        return self.account is not None and r.portfolio.account is self.account
+
     def sync_runners(self, specs: list[tuple[StrategySpec, str]]) -> list[str]:
         """Apply champion/challenger changes mid-run: add new versions, relabel promoted ones,
         retire removed ones (no new entries; open positions still exit normally)."""
         changes = []
         want = {s.key: (s, lbl) for s, lbl in specs}
         have = {r.key: r for r in self.runners}
+        promoted = False
         for key, (spec, lbl) in want.items():
             if key not in have:
-                self.runners.append(Runner(spec, self.settings.portfolio.starting_sol, lbl))
+                self.runners.append(Runner(spec, self.settings.portfolio.starting_sol, lbl, self._account_for(lbl)))
                 changes.append(f"+{key} ({lbl})")
             elif have[key].label != lbl:
-                changes.append(f"{key}: {have[key].label} → {lbl}")
-                have[key].label = lbl
+                r = have[key]
+                changes.append(f"{key}: {r.label} → {lbl}")
+                promoted = promoted or (lbl == "champion" and r.label in SHADOW_LABELS)
+                r.label = lbl
+        if promoted and self.account is not None:
+            # a new champion starts the shared wallet over: fresh starting money, nothing inherited
+            self.account = Account(self.fresh_wallet_sol())
+            self.wallet_epoch += 1
+            changes.append(f"champions' wallet restarted with {self.account.starting_sol:.4f} SOL for the new champion")
+        if self.account is not None:
+            # champions join the current shared wallet once flat (positions finish on the wallet that paid for them)
+            for r in self.runners:
+                if (r.label not in SHADOW_LABELS and r.label != "retired" and not self.in_shared_wallet(r)
+                        and not r.portfolio.positions and not r.pending_buys):
+                    r.portfolio.account = self.account
+            # demoted champions leave the shared wallet once flat, onto a fresh paper wallet of their own
+            for r in self.runners:
+                if (r.label in SHADOW_LABELS and self.in_shared_wallet(r)
+                        and not r.portfolio.positions and not r.pending_buys):
+                    r.portfolio.account = Account(self.settings.portfolio.starting_sol)
+                    changes.append(f"{r.key} left the champions' wallet")
         for key, r in have.items():
             if key not in want and r.label != "retired":
                 r.label = "retired"

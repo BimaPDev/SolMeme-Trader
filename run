@@ -42,7 +42,7 @@ case "$cmd" in
     exec "$solmeme" setup "$@"
     ;;
   -h|--help|help)
-    sed -n '2,11p' "$0"
+    sed -n '2,13p' "$0"
     ;;
   *)
     exec "$solmeme" "$@"

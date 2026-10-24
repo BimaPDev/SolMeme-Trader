@@ -1,0 +1,33 @@
+id: dbc_momentum
+description: >
+  Meteora Dynamic Bonding Curve launches (Meteora DBC, Bags, Believe, Jupiter Studio) with strong
+  5-minute DexScreener buy pressure. Same idea as dex_curve_momentum on pump.fun's #2 rival.
+  Skips the first 2 minutes: DBC launchpads often charge a decaying anti-sniper fee right after
+  launch, and paper fills use a flat pessimistic 2% curve fee. No bonding progress (each DBC
+  launchpad sets its own graduation point), so a market cap cap stands in for "not too late".
+universe: {pools: [meteoradbc], stage: curve, min_age_s: 120, max_age_s: 1800}
+entry:
+  triggers: [enrichment]
+  all:
+    - {id: buys, f: dex_buys_m5, op: ">=", v: $min_buys_m5}
+    - {id: ratio, f: dex_buy_ratio_m5, op: ">=", v: $min_buy_ratio}
+    - {id: vol, f: dex_volume_m5_usd, op: ">=", v: $min_vol_m5}
+    - {id: up, f: dex_price_chg_m5, op: ">", v: 0}
+    - {id: notlate, f: mcap_sol, op: "<", v: $max_mcap_sol}
+  none:
+    - {id: rug, f: hard_rug, op: "==", v: true, locked: true}
+sizing: {sol: 0.1, max_open: 5, max_entries_per_token: 1}
+exits:
+  take_profit: [{at_x: 2.0, sell_pct: 50}, {at_x: 4.0, sell_pct: 100}]
+  stop_loss_pct: $sl
+  trailing_pct: 30
+  trailing_activate_x: 1.5
+  max_hold_s: 1200
+  stale_after_s: 180
+  on_rug: true
+params:
+  min_buys_m5: {value: 15, lo: 3, hi: 150, type: int}
+  min_buy_ratio: {value: 1.4, lo: 1.0, hi: 5.0}
+  min_vol_m5: {value: 1500, lo: 200, hi: 50000}
+  max_mcap_sol: {value: 600, lo: 50, hi: 5000}
+  sl: {value: 35, lo: 10, hi: 70}

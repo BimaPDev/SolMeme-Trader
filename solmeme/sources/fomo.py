@@ -423,8 +423,10 @@ class Source(BrowserSource):
     def __init__(self, ctx):
         super().__init__(ctx)
         self.followed = Followed()
+        self.leaderboard: list[dict] = []
         self._seen: set[str] = set()
         self._tick = 0
+        self._have_period = False      # the configured leaderboard window has been seen
 
     def _params(self) -> tuple[int, str, float]:
         try:
@@ -450,6 +452,7 @@ class Source(BrowserSource):
             if row.get("handle"):
                 book.handles[row["handle"].lower()] = row["address"]
         self.followed = book
+        self.leaderboard = list(traders[:top_n])
 
     def _dedupe(self, events: list) -> list:
         out = []
@@ -479,12 +482,14 @@ class Source(BrowserSource):
         return self._dedupe(events)
 
     def on_http(self, url, data) -> list:
-        if leaderboard_window(url) not in (None, "") and not self._period_ok(url):
-            return []
-        _, _, min_usd = self._params()
+        _, period, min_usd = self._params()
         events, recognized, traders = parse_http(url, data, self.followed, min_usd=min_usd)
-        if traders and self._period_ok(url):      # empty → not the trader list; keep the current set
-            self._apply_traders(traders)
+        if traders:                               # empty → not the trader list; keep the current set
+            if leaderboard_window(url) == period:
+                self._have_period = True
+            # The site opens on its 24h board; use whatever window loaded until the configured one does.
+            if self._period_ok(url) or not self._have_period:
+                self._apply_traders(traders)
         if not recognized:
             self.sample("http", url, data)
         return self._dedupe(events)

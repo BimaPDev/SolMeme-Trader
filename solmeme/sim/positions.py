@@ -20,6 +20,26 @@ def position_rows(
     return rows
 
 
+def position_values(engine: Engine, *, closed_limit: int = 8) -> list[tuple[str, float, float]]:
+    """(mint, invested SOL, worth now SOL) for the same rows, in the same order, as position_rows.
+    Worth now = SOL already sold for plus what is still held at market; minus invested = made."""
+    out = [(pos.mint, pos.cost_sol, pos.proceeds_sol + _held_value(engine, pos)) for _, pos in _open_positions(engine)]
+    for t in _closed_trades(engine, closed_limit):
+        size = float(t.get("size_sol") or 0.0)
+        out.append((str(t.get("mint") or ""), size, size + float(t.get("pnl_sol") or 0.0)))
+    return out
+
+
+def position_owners(engine: Engine, *, closed_limit: int = 8) -> list[tuple[str, str]]:
+    """(strategy key, role) for the same rows, in the same order, as position_rows."""
+    roles = {r.key: r.label for r in engine.runners}
+    out = [(runner.key, runner.label) for runner, _ in _open_positions(engine)]
+    for t in _closed_trades(engine, closed_limit):
+        key = f"{t.get('strategy_id')}@{t.get('version')}"
+        out.append((key, roles.get(key, "")))
+    return out
+
+
 def _open_positions(engine: Engine) -> list[tuple]:
     found = [
         (pos.entry_ts, runner, pos)

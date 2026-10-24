@@ -36,3 +36,20 @@ def test_upsert_env_rejects_a_multiline_secret(tmp_path):
     else:
         raise AssertionError("expected ValueError")
     assert not path.exists()
+
+
+def test_a_key_added_to_env_while_running_is_seen_without_a_restart(tmp_path, monkeypatch):
+    import os
+
+    from solmeme import config
+
+    monkeypatch.setattr(config, "ROOT", tmp_path)
+    monkeypatch.delenv("LATE_KEY", raising=False)
+    env = tmp_path / ".env"
+    env.write_text("OTHER=1\n", encoding="utf-8")
+    assert config.secret("LATE_KEY") == ""
+    env.write_text("OTHER=1\nLATE_KEY=abc\n", encoding="utf-8")
+    os.utime(env, (env.stat().st_atime, env.stat().st_mtime + 5))     # a later write, even within one clock tick
+    assert config.secret("LATE_KEY") == "abc"
+    monkeypatch.setenv("LATE_KEY", "from-env")
+    assert config.secret("LATE_KEY") == "from-env"                     # the process environment still wins

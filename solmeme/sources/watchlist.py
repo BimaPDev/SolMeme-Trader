@@ -19,6 +19,7 @@ class Watchlist:
         self.max_size = max_size
         self.reasons: dict[str, dict[str, float]] = {}
         self.pinned: set[str] = set()
+        self.pin_rank: dict[str, int] = {}      # lower first: what the live wallet / champions hold beats swarm holdings
 
     def touch(self, mint: str, reason: str, ts: float) -> None:
         self.reasons.setdefault(mint, {})[reason] = ts
@@ -39,8 +40,9 @@ class Watchlist:
             else:
                 self.touch(ev.mint, "signal", ev.ts)
 
-    def set_pinned(self, mints: set[str]) -> None:
+    def set_pinned(self, mints: set[str], ranks: dict[str, int] | None = None) -> None:
         self.pinned = set(mints)
+        self.pin_rank = {m: (ranks or {}).get(m, 9) for m in self.pinned}
 
     def _alive(self, reason: str, ts: float, now: float) -> bool:
         ttl = self.launch_window_s if reason == "launch" else self.ttl_s
@@ -58,4 +60,5 @@ class Watchlist:
             scored.append((best, -max(live.values()), mint))
         scored.sort()
         ordered = [m for _, _, m in scored if m not in self.pinned]
-        return [*sorted(self.pinned), *ordered][: self.max_size]
+        pinned = sorted(self.pinned, key=lambda m: (self.pin_rank.get(m, 9), m))
+        return [*pinned, *ordered][: self.max_size]

@@ -214,9 +214,9 @@ def test_second_tweet_id_updates_count_and_max_followers():
 
 def test_source_keeps_mint_stats(settings):
     src = source(settings)
-    first = src.on_ws(WS, frame("tweet_first.json"))
-    again = src.on_ws(WS, frame("tweet_first.json"))
-    second = src.on_ws(WS, frame("tweet_second.json"))
+    first = sigs(src.on_ws(WS, frame("tweet_first.json")))
+    again = sigs(src.on_ws(WS, frame("tweet_first.json")))
+    second = sigs(src.on_ws(WS, frame("tweet_second.json")))
     assert first[0].data["tweet_count"] == 1 and first[0].mint == MINT
     assert again == []
     assert second[0].data["tweet_count"] == 2
@@ -255,21 +255,30 @@ def test_authors_filter():
         assert recognized is True and len(events) == 1
 
 
+def sigs(evs):
+    return [e for e in evs if e.kind == "signal"]          # on_ws also returns every tweet as a narrative Headline
+
+
+def test_source_returns_tweets_as_headlines(settings):
+    evs = source(settings).on_ws(WS, frame("tweet_valid.json"))
+    assert {e.kind for e in evs} == {"signal", "headline"}
+
+
 def test_source_author_string(settings):
     src = source(settings, authors="alice, bob")
-    assert len(src.on_ws(WS, frame("tweet_first.json"))) == 1
-    assert len(src.on_ws(WS, frame("tweet_second.json"))) == 1
+    assert len(sigs(src.on_ws(WS, frame("tweet_first.json")))) == 1
+    assert len(sigs(src.on_ws(WS, frame("tweet_second.json")))) == 1
     assert src.on_ws(WS, frame("tweet_low.json"))[0].data["author"] == "alice"
 
 
 def test_source_toggle_options(settings):
     settings.sources.j7tracker = Toggle(min_followers=1000, authors=["alice"])
     src = Source(Context(settings, None, lambda e: None))
-    kept = src.on_ws(WS, frame("tweet_first.json"))
-    low = src.on_ws(WS, frame("tweet_low.json"))
-    other = src.on_ws(WS, frame("tweet_second.json"))
-    unknown = src.on_ws(WS, frame("tweet_no_followers.json"))
-    exact = src.on_ws(WS, frame("tweet_exact.json"))
+    kept = sigs(src.on_ws(WS, frame("tweet_first.json")))
+    low = sigs(src.on_ws(WS, frame("tweet_low.json")))
+    other = sigs(src.on_ws(WS, frame("tweet_second.json")))
+    unknown = sigs(src.on_ws(WS, frame("tweet_no_followers.json")))
+    exact = sigs(src.on_ws(WS, frame("tweet_exact.json")))
     assert len(kept) == 1 and kept[0].data["author"] == "Alice"
     assert kept[0].data["tweet_count"] == 1
     assert low == [] and other == [] and unknown == []
@@ -411,7 +420,7 @@ def test_source_identity_and_lookalike(settings):
     assert src.name == "j7tracker"
     assert src.on_ws(LOOKALIKE, frame("tweet_valid.json")) == []
     assert not samples(settings).exists()
-    found = src.on_ws(WS, frame("tweet_valid.json"))
+    found = sigs(src.on_ws(WS, frame("tweet_valid.json")))
     assert len(found) == 1 and found[0].mint == MINT
     assert not samples(settings).exists()
 

@@ -83,16 +83,21 @@ class TokenActivity:
         analyze_limit: int = 6,
         check_limit: int = 4,
         watch_limit: int = 4,
+        opened: dict[str, float] | None = None,
     ) -> list[TokenNote]:
         out: list[TokenNote] = []
         shown: set[str] = set()
 
+        opened = opened or {}
         for mint, strategy in list(held.items())[:hold_limit]:
             selling = self._notes["selling"].get(mint)
             if selling is not None:
                 row = selling
             else:
-                row = TokenNote(mint, "holding", f"{strategy} open", symbols.get(mint, ""), now)
+                row = TokenNote(
+                    mint, "holding", f"{strategy} open", symbols.get(mint, ""),
+                    opened.get(mint, now),
+                )
             self._add(out, shown, row, symbols)
 
         merged: list[TokenNote] = []
@@ -106,9 +111,8 @@ class TokenActivity:
         for mint in watch.priority_list(now):
             if mint in shown:
                 continue
-            watching.append(
-                TokenNote(mint, "watching", _watch_detail(watch, mint, now), symbols.get(mint, ""), now)
-            )
+            detail, since = _watch_choice(watch, mint, now)
+            watching.append(TokenNote(mint, "watching", detail, symbols.get(mint, ""), since))
             if len(watching) >= watch_limit:
                 break
         self._take(out, shown, watching, symbols, watch_limit)
@@ -141,17 +145,19 @@ class TokenActivity:
             added += 1
 
 
-def _watch_detail(watch, mint: str, now: float) -> str:
-    best: tuple[int, str] | None = None
+def _watch_choice(watch, mint: str, now: float) -> tuple[str, float]:
+    best_key: tuple[int, str] | None = None
+    best_ts = now
     for reason, ts in watch.reasons.get(mint, {}).items():
         window = watch.launch_window_s if reason == "launch" else watch.ttl_s
         if now - ts > window:
             continue
         key = (RANK.get(reason, _UNKNOWN_RANK), reason)
-        if best is None or key < best:
-            best = key
-    if best is not None:
-        return best[1]
+        if best_key is None or key < best_key:
+            best_key = key
+            best_ts = ts
+    if best_key is not None:
+        return best_key[1], best_ts
     if mint in watch.pinned:
-        return "pinned"
-    return "watched"
+        return "pinned", now
+    return "watched", now

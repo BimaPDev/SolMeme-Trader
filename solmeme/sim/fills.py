@@ -46,9 +46,25 @@ def order_rng(seed: int, *parts) -> random.Random:
     return random.Random(int.from_bytes(h[:8], "big"))
 
 
+STREAM_STALE_S = 20.0      # a trade stream this much older than the latest price no longer pins the reserves
+STREAM_GAP = 0.05          # ... once they disagree by more than this
+
+
+def _stream_stale(st, reserve_price: float) -> bool:
+    """Reserves from a trade stream freeze when the stream stops (the pump.fun feed only keeps the top watched
+    coins), while GMGN/Dex keep moving price_sol. Oct 10: 16% of paper curve fills landed 10%+ under the
+    price the strategy decided on (IMPOSTINU: paper 56 SOL mcap, real 99); those fake-cheap fills averaged
+    +21.6% against -11.7% for the rest. Fill at the decided price instead once the stream is behind it."""
+    if not getattr(st, "reserves_exact", False) or not reserve_price or not st.price_sol:
+        return False
+    behind = (st.price_ts or 0) - (getattr(st, "last_trade_ts", None) or 0) > STREAM_STALE_S
+    return behind and abs(reserve_price / st.price_sol - 1) > STREAM_GAP
+
+
 class FillModel:
-    def __init__(self, cfg: FillsCfg):
+    def __init__(self, cfg: FillsCfg, calib=None):
         self.cfg = cfg
+        self.calib = calib          # sim/calibration.py: real-vs-paper gaps measured by the live dry run
 
     def latency_s(self, rng: random.Random) -> float:
         lo, hi = self.cfg.latency_ms
@@ -58,13 +74,19 @@ class FillModel:
     def _venue(self, st):
         if st.price_sol is None:
             return None, None
+        p = st.price_sol
         if not st.migrated:
             if st.v_sol and st.v_tokens:
                 kind = "curve" if st.pool == "pump" else "curve_approx"
+                if _stream_stale(st, st.v_sol / st.v_tokens):
+                    k = st.v_sol * st.v_tokens          # same curve, moved to the price the strategy decided on
+                    return kind, (math.sqrt(k * p), math.sqrt(k / p))
                 return kind, (st.v_sol, st.v_tokens)
-            p = st.price_sol
             return "curve_approx", (math.sqrt(PUMP_K * p), math.sqrt(PUMP_K / p))
-        pool = st.amm or Pool.seed_from_price(st.price_sol)
+        pool = st.amm or Pool.seed_from_price(p)
+        if st.amm is not None and _stream_stale(st, pool.price):
+            pool = Pool(pool.sol, pool.tokens)
+            pool.reanchor(p, None)
         return "amm", pool
 
     def quote_buy(self, st, sol_in: float) -> tuple[float, str] | None:
@@ -73,7 +95,7 @@ class FillModel:
             return None
         if kind == "amm":
             return v.buy_out(sol_in, self.cfg.amm_fee_pct(st.mcap_sol)), kind
-        tokens, _, _ = curve.buy_out(v[0], v[1], sol_in, self.cfg.curve_fee_pct)
+        tokens, _, _ = curve.buy_out(v[0], v[1], sol_in, self.cfg.curve_fee(st.pool))
         return tokens, kind
 
     def quote_sell(self, st, tokens: float) -> tuple[float, str] | None:
@@ -82,7 +104,7 @@ class FillModel:
             return None
         if kind == "amm":
             return v.sell_out(tokens, self.cfg.amm_fee_pct(st.mcap_sol)), kind
-        sol, _, _ = curve.sell_out(v[0], v[1], tokens, self.cfg.curve_fee_pct)
+        sol, _, _ = curve.sell_out(v[0], v[1], tokens, self.cfg.curve_fee(st.pool))
         return sol, kind
 
     def liquidation_value(self, st, tokens: float) -> float | None:
@@ -100,12 +122,20 @@ class FillModel:
         tokens, venue = q
         limit = ref_price * (1 + c.slippage_tolerance_pct / 100)
         eff = sol_in / tokens
+        if self.calib is not None:              # what real prices did to fills like this one
+            gap = self.calib.buy_gap(rng)
+            if gap is None:
+                return Fill(False, "buy", "no_route_live", cost_sol=c.priority_fee_sol)
+            eff *= 1 + gap
+            tokens = sol_in / eff
         if eff > limit:
             return Fill(False, "buy", "slippage", cost_sol=c.priority_fee_sol,
                         meta={"landed_price": eff, "limit": limit})
-        sandwiched = rng.random() < c.sandwich_prob
+        bare = c.jito_tip_sol <= 0                      # no MEV protection
+        sandwiched = rng.random() < (c.sandwich_prob_unprotected if bare else c.sandwich_prob)
         if sandwiched:
-            eff = min(limit, eff * (1 + c.sandwich_extra_pct / 100))
+            extra = c.sandwich_extra_unprotected_pct if bare else c.sandwich_extra_pct
+            eff = min(limit, eff * (1 + extra / 100))
             tokens = sol_in / eff
         cost = c.priority_fee_sol + c.jito_tip_sol + sol_in * c.platform_fee_pct / 100 + c.ata_rent_sol
         return Fill(True, "buy", "filled", sol=sol_in, tokens=tokens, price=eff, cost_sol=cost,
@@ -119,6 +149,8 @@ class FillModel:
         if q is None:
             return Fill(False, "sell", "no_liquidity", cost_sol=c.priority_fee_sol)
         sol_out, venue = q
+        if self.calib is not None:
+            sol_out *= 1 + self.calib.sell_gap(rng)
         eff = sol_out / tokens if tokens > 0 else 0.0
         limit = ref_price * (1 - c.sell_slippage_tolerance_pct / 100)
         if not force and eff < limit:

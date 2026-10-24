@@ -1,0 +1,36 @@
+id: og_hunter
+description: >
+  Trial (paper-only, own wallet). Buy the original of a copycat cluster on a 20-70% dip once
+  copies of its ticker/name start launching. Oct 1-9 data, 58k launches: the first of a 3+ cluster
+  reached $30k 6.2% of the time vs 1.1-2% for copies; once copies appear the OG still went 2x
+  within the hour 18-28% of the time vs 3.8% for an average coin, but about half fell 50% first.
+  Replay: buying when copied lost in all three periods (-4%, -31%, -0.2% a trade); on a dip it
+  lost on Oct 1 and Oct 8 and won in the test run (+23%, 14 trades). Those recordings rarely
+  price-tracked OGs; the live bot now watches an OG the moment it is copied, so judge it live.
+universe: {stage: any, max_age_s: 7200}
+entry:
+  triggers: [enrichment, signal, curve_trade, pool_trade]
+  all:
+    - {id: og, f: is_og, op: "==", v: true}
+    - {id: copies, f: copies_after, op: ">=", v: $min_copies}
+    - {id: mcap_lo, f: mcap_usd, op: ">=", v: $min_mcap}
+    - {id: mcap_hi, f: mcap_usd, op: "<=", v: $max_mcap}
+    - {id: dip, f: dd_from_ath_pct, op: between, v: [$dip_min, $dip_max]}
+  none:
+    - {id: rug, f: hard_rug, op: "==", v: true, locked: true}
+    - {id: rugr, f: gmgn_rug_ratio, op: ">", v: 0.5}
+sizing: {sol: 0.1, max_open: 5, max_entries_per_token: 1}
+exits:
+  take_profit: [{at_x: 2.0, sell_pct: 50}, {at_x: 4.0, sell_pct: 100}]
+  stop_loss_pct: $sl
+  trailing_pct: null
+  max_hold_s: 3600
+  stale_after_s: 300
+  on_rug: true
+params:
+  min_copies: {value: 2, lo: 1, hi: 10, type: int}
+  min_mcap: {value: 5000, lo: 3000, hi: 30000}
+  max_mcap: {value: 60000, lo: 20000, hi: 500000}
+  dip_min: {value: 20, lo: 8, hi: 50}
+  dip_max: {value: 70, lo: 40, hi: 85}
+  sl: {value: 25, lo: 10, hi: 50}

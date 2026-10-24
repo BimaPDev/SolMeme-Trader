@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS strategy_versions (
     strategy_id TEXT NOT NULL,
     version TEXT NOT NULL,
     spec_json TEXT NOT NULL,
-    status TEXT NOT NULL,              -- champion | challenger | retired | rejected | candidate
+    status TEXT NOT NULL,              -- champion | challenger | trial | swarm | retired | rejected | candidate | dead
     parent_version TEXT,
     created_ts REAL NOT NULL,
     status_ts REAL NOT NULL,
@@ -76,6 +76,50 @@ CREATE TABLE IF NOT EXISTS llm_usage (
     ts REAL, purpose TEXT, model TEXT, input_tokens INTEGER, output_tokens INTEGER,
     cache_read INTEGER, cache_write INTEGER, cost_usd REAL
 );
+CREATE TABLE IF NOT EXISTS evo_log (
+    ts REAL, gen INTEGER, strategy_id TEXT, version TEXT, parent_version TEXT, mate_version TEXT,
+    ops TEXT,                         -- json list of mutation signatures
+    event TEXT,                       -- born | screened_out | killed | promoted
+    fitness REAL, parent_fitness REAL, reason TEXT
+);
+CREATE INDEX IF NOT EXISTS evo_log_by_version ON evo_log(version, event);
+CREATE TABLE IF NOT EXISTS evo_scores (
+    gen INTEGER, ts REAL, key TEXT, role TEXT, replay REAL, replay_n INTEGER,
+    live_n INTEGER, live_pnl_sol REAL, equity REAL, fitness REAL
+);
+CREATE TABLE IF NOT EXISTS evo_lessons (
+    gen INTEGER, ts REAL, strategy_id TEXT, feature TEXT, op TEXT, v REAL,
+    saved_sol REAL, blocked INTEGER, n INTEGER
+);
+CREATE TABLE IF NOT EXISTS council_ideas (
+    idea_id TEXT PRIMARY KEY, ts REAL, gen INTEGER, strategy_id TEXT,
+    feature TEXT, op TEXT, v REAL, kind TEXT,     -- kind: require (entry.all) | avoid (entry.none)
+    reason TEXT, proposed_by TEXT, votes_json TEXT, score REAL, approved INTEGER, in_sample_json TEXT,
+    status TEXT,                      -- unhelpful | rejected | testing | working | failed
+    status_reason TEXT, carriers INTEGER DEFAULT 0, live_trades INTEGER DEFAULT 0,
+    live_pnl_sol REAL DEFAULT 0, deaths INTEGER DEFAULT 0, replay_delta REAL
+);
+CREATE TABLE IF NOT EXISTS council_calls (
+    ts REAL, member TEXT, purpose TEXT, seconds REAL, ok INTEGER, error TEXT
+);
+CREATE TABLE IF NOT EXISTS council_messages (     -- a sitting as a chat: what each judge said, as it happened
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL, sitting TEXT, gen INTEGER,
+    topic TEXT,                       -- strategy id, or "bans"
+    phase TEXT,                       -- open | explain | check | vote | verdict | bans | close
+    speaker TEXT,                     -- a judge's name, or "council" (the chair: data checks, tallies)
+    kind TEXT,                        -- asking | answer | error | system
+    text TEXT, data_json TEXT
+);
+CREATE INDEX IF NOT EXISTS council_messages_sitting ON council_messages(sitting, id);
+CREATE TABLE IF NOT EXISTS dryrun_trades (        -- the live dry run: champion trades priced from real quotes
+    mint TEXT, symbol TEXT, key TEXT, entry_ts REAL, exit_ts REAL,
+    size_sol REAL, proceeds_sol REAL, pnl_sol REAL, pnl_pct REAL, fees_sol REAL,
+    entry_price REAL, exit_price REAL, paper_entry_price REAL, paper_exit_price REAL,
+    paper_pnl_pct REAL, paper_trade_id TEXT, buy_impact_pct REAL, sell_impact_pct REAL,
+    route TEXT, exit_reason TEXT, status TEXT, note TEXT,  -- status: closed | stuck
+    attempt INTEGER DEFAULT 1                             -- which live attempt (each a fresh real-size wallet)
+);
 CREATE TABLE IF NOT EXISTS sniper_state (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     blob TEXT NOT NULL,
@@ -113,6 +157,9 @@ class Store:
         self.conn.execute("PRAGMA synchronous=NORMAL")
         self.conn.executescript(SCHEMA)
         self._migrate_sniper()
+        cols = {row[1] for row in self.conn.execute("PRAGMA table_info(dryrun_trades)")}
+        if cols and "attempt" not in cols:               # tables from before attempts existed
+            self.conn.execute("ALTER TABLE dryrun_trades ADD COLUMN attempt INTEGER DEFAULT 1")
 
     def close(self) -> None:
         self.conn.close()
@@ -161,7 +208,7 @@ class Store:
         return rows[0] if rows else None
 
     def active_versions(self) -> list[dict]:
-        return self.query("SELECT * FROM strategy_versions WHERE status IN ('champion','challenger') "
+        return self.query("SELECT * FROM strategy_versions WHERE status IN ('champion','challenger','trial','swarm') "
                           "ORDER BY strategy_id, status")
 
     def versions(self, strategy_id: str | None = None) -> list[dict]:
@@ -239,6 +286,76 @@ class Store:
     def llm_spend_since(self, ts: float) -> float:
         r = self.conn.execute("SELECT COALESCE(SUM(cost_usd),0) FROM llm_usage WHERE ts>=?", (ts,)).fetchone()
         return float(r[0])
+
+    # ── strategy swarm ─────────────────────────────────────────────────────
+    def insert_evo(self, row: dict) -> None:
+        self._insert("evo_log", row)
+
+    def evo_rows(self, version: str | None = None, event: str | None = None) -> list[dict]:
+        sql, p = "SELECT * FROM evo_log WHERE 1=1", []
+        if version:
+            sql += " AND version=?"; p.append(version)
+        if event:
+            sql += " AND event=?"; p.append(event)
+        return self.query(sql + " ORDER BY ts", p)
+
+    def evo_generation(self) -> int:
+        r = self.conn.execute("SELECT COALESCE(MAX(gen),0) FROM evo_log").fetchone()[0]
+        s = self.conn.execute("SELECT COALESCE(MAX(gen),0) FROM evo_scores").fetchone()[0]
+        return int(max(r, s))
+
+    def insert_evo_lesson(self, row: dict) -> None:
+        self._insert("evo_lessons", row)
+
+    def insert_evo_score(self, row: dict) -> None:
+        self._insert("evo_scores", row)
+
+    def evo_scores(self, gen: int | None = None) -> list[dict]:
+        gen = self.evo_generation() if gen is None else gen
+        return self.query("SELECT * FROM evo_scores WHERE gen=? ORDER BY fitness DESC", [gen])
+
+    # ── council ────────────────────────────────────────────────────────────
+    def insert_council_idea(self, row: dict) -> None:
+        self._insert("council_ideas", row, replace=True)
+
+    def update_council_idea(self, idea_id: str, **fields) -> None:
+        sets = ",".join(f"{k}=?" for k in fields)
+        self.conn.execute(f"UPDATE council_ideas SET {sets} WHERE idea_id=?", [*fields.values(), idea_id])
+
+    def council_ideas(self, strategy_id: str | None = None, approved: bool | None = None,
+                      limit: int = 500) -> list[dict]:
+        sql, p = "SELECT * FROM council_ideas WHERE 1=1", []
+        if strategy_id:
+            sql += " AND strategy_id=?"; p.append(strategy_id)
+        if approved is not None:
+            sql += " AND approved=?"; p.append(int(approved))
+        return self.query(sql + " ORDER BY ts LIMIT ?", [*p, limit])
+
+    def log_council_call(self, row: dict) -> None:
+        self._insert("council_calls", row)
+
+    def council_calls(self, since: float = 0.0) -> list[dict]:
+        return self.query("SELECT * FROM council_calls WHERE ts>=? ORDER BY ts", [since])
+
+    def add_council_message(self, row: dict) -> None:
+        self._insert("council_messages", row)
+
+    def council_sittings(self, limit: int = 30) -> list[dict]:
+        """Newest first: each sitting's gen, first/last message time, size, and whether it was closed."""
+        return self.query(
+            "SELECT sitting, MIN(gen) AS gen, MIN(ts) AS started, MAX(ts) AS last_ts, COUNT(*) AS n, "
+            "MAX(phase='close') AS closed FROM council_messages GROUP BY sitting ORDER BY MIN(id) DESC LIMIT ?",
+            [limit])
+
+    def add_dryrun_trade(self, row: dict) -> None:
+        self._insert("dryrun_trades", row)
+
+    def dryrun_trades(self, since: float = 0.0) -> list[dict]:
+        return self.query("SELECT * FROM dryrun_trades WHERE exit_ts>=? ORDER BY exit_ts", [since])
+
+    def council_messages(self, sitting: str, after_id: int = 0, limit: int = 1000) -> list[dict]:
+        return self.query("SELECT * FROM council_messages WHERE sitting=? AND id>? ORDER BY id LIMIT ?",
+                          [sitting, after_id, limit])
 
     # ── launch sniper ──────────────────────────────────────────────────────
     def _migrate_sniper(self) -> None:

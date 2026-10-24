@@ -3,6 +3,8 @@ import time
 
 from solmeme.core.eventlog import EventLogWriter, read_events
 from solmeme.core.events import TokenLaunched
+from solmeme.core.store import Store
+from solmeme.lab.synth import generate
 from solmeme.sim.live import LiveSession
 from solmeme.sources.base import Context
 from solmeme.features.registry import FeatureView
@@ -51,6 +53,39 @@ def test_warmup_replays_recent_log(settings, specs):
     assert session.last_ts == now - 30
 
 
+def test_warmup_does_not_rejournal_replayed_trades(settings, specs):
+    now = time.time()
+    w = EventLogWriter(settings.events_dir)
+    for ev in generate(n_tokens=160, duration_s=1500, start_ts=now - 2400, seed=5):
+        if ev.ts < now - 5:
+            w.write(ev)
+    w.close()
+    store = Store(settings.db_path)
+    session = LiveSession(settings, store, [(specs["curve_momentum"], "champion")], warmup_min=45, ai=False)
+    assert session.engine.journal.trades, "replay should rebuild some closed trades in memory"
+    assert store.trades() == []
+    assert store.query("SELECT * FROM orders") == []
+    assert store.query("SELECT * FROM near_misses") == []
+
+
+def test_fresh_warmup_loads_market_but_starts_with_an_untouched_wallet(settings, specs):
+    now = time.time()
+    w = EventLogWriter(settings.events_dir)
+    for ev in generate(n_tokens=160, duration_s=1500, start_ts=now - 2400, seed=5):
+        if ev.ts < now - 5:
+            w.write(ev)
+    w.close()
+    settings.portfolio.shared_wallet = True
+    session = LiveSession(settings, None, [(specs["curve_momentum"], "champion")], warmup_min=45, ai=False,
+                          fresh=True)
+    eng = session.engine
+    assert eng.market.tokens, "market data should still be rebuilt"
+    assert eng.journal.trades == []
+    assert all(not r.portfolio.positions for r in eng.runners)
+    assert eng.account.cash == eng.account.starting_sol
+    assert session.last_ts > now - 2400
+
+
 def test_live_scan_runs_boards_and_people(settings, monkeypatch):
     seen = {}
 
@@ -69,8 +104,34 @@ def test_live_scan_runs_boards_and_people(settings, monkeypatch):
     session = LiveSession(settings, None, None, warmup_min=0, ai=False)
     session.ctx = Context(settings, None, lambda ev: None)
     asyncio.run(session._one_scan())
-    assert seen["pump"] is not None and seen["people"] is True
+    assert seen["pump"] is not None and "people" not in seen
     assert any((settings.data_dir / "boards").glob("*.md"))
+    assert "fomo" in session.people_note
+
+
+def test_live_scan_uses_the_fomo_leaderboard(settings, monkeypatch):
+    async def fake_snapshot(req, **kwargs):
+        return {"trenches": {}, "trending": [], "buys": [], "cards": [], "pump": {"new": [], "almost": [], "graduated": []}}
+
+    monkeypatch.setattr("solmeme.lab.boards.snapshot", fake_snapshot)
+    monkeypatch.setattr("solmeme.sources.gmgn.available", lambda: True)
+    session = LiveSession(settings, None, None, warmup_min=0, ai=False)
+    session.ctx = Context(settings, None, lambda ev: None)
+
+    class Fomo:
+        name = "fomo"
+        leaderboard = [{"address": "W", "handle": "otter"}]
+
+    session.sources = [Fomo()]
+    asyncio.run(session._one_scan())
+    assert session.people_cards[0]["text"].startswith("otter")
+    assert session.people_note == ""
+
+    session.sources = []
+    asyncio.run(session._one_scan())
+    assert session.people_cards == []
+    assert "GMGN" not in session.people_note
+    assert "fomo" in session.people_note
 
 
 def test_no_lookahead_in_features(events):
@@ -94,3 +155,20 @@ def test_metrics_account_for_failed_buys(settings, specs, events):
     r = eng.runners[0]
     cash_change = r.portfolio.cash - settings.portfolio.starting_sol
     assert abs(cash_change - m.total_pnl_sol) < 1e-6
+
+
+def test_the_trade_tape_records_every_fill(settings, specs, events):
+    from types import SimpleNamespace
+
+    from solmeme.ui.narrative_view import build_trades
+
+    eng = run_replay(settings, [(specs["curve_momentum"], "swarm"), (specs["kol_follow"], "champion")], events)
+    buys = [t for t in eng.tape if t["side"] == "buy"]
+    closes = [t for t in eng.tape if t["side"] == "sell" and "pnl_sol" in t]
+    assert buys and closes
+    assert {t["role"] for t in eng.tape} <= {"swarm", "champion"}
+    assert all(t["why"] for t in buys) and all(" " in w for w in buys[0]["why"])     # "feature value"
+    closed = {(t["trade_id"].split(":")[0], round(t["pnl_sol"], 9)) for t in eng.journal.trades}
+    assert {(t["key"], round(t["pnl_sol"], 9)) for t in closes} <= closed
+    view = build_trades(SimpleNamespace(engine=eng))
+    assert view["tape"][0]["ts"] >= view["tape"][-1]["ts"] and view["stats"]["closed"] == len(closes)

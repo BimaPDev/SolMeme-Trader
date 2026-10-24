@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Fresh paper run: a brand-new wallet, nothing carried over from earlier sessions.
+#
+#   ./start                 $50 wallet (settings.yaml), rich log
+#   ./start web             same, site at http://127.0.0.1:8787
+#   ./start tui             same, Bubble Tea full-screen UI
+#   ./start 75              start with $75 instead
+#   ./start web 75 --goal 200 --minutes 60
+#
+# Anything after the UI and amount goes straight to `solmeme run`
+# (--goal N, --minutes N, --warmup-min N, ...).
+set -euo pipefail
+cd "$(dirname "$0")"
+
+solmeme=".venv/bin/solmeme"
+if [[ ! -x "$solmeme" ]]; then
+  echo "No virtualenv yet. From this folder:"
+  echo "  uv venv && uv pip install -e ."
+  exit 1
+fi
+
+case "${1:-}" in
+  -h|--help|help)
+    sed -n '2,11p' "$0"
+    exit 0
+    ;;
+esac
+
+ui=normal
+if [[ "${1:-}" =~ ^(normal|web|tui)$ ]]; then
+  ui="$1"
+  shift
+fi
+
+args=()
+if [[ "${1:-}" =~ ^\$?[0-9]+(\.[0-9]+)?$ ]]; then
+  args+=(--usd "${1#\$}")
+  shift
+fi
+
+exec "$solmeme" run --no-ai --fresh --new-wallet --ui "$ui" ${args[@]+"${args[@]}"} "$@"

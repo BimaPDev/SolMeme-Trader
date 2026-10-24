@@ -25,19 +25,47 @@ sources:
     url: wss://pumpportal.fun/api/data
   gmgn:
     enabled: true            # needs GMGN_API_KEY (free at gmgn.ai/ai); skipped otherwise
-    rate_per_s: 2.0          # free tier is a small leaky bucket — stay well under it
+    rate_per_s: 1.0          # free tier is a small leaky bucket; shared by every GMGN call in the bot (feeds + scans)
     trenches_poll_s: 10      # New / Almost / Migrated snapshots (holders, top10, smart money, rug ratio…)
     trench_limit: 80
     trench_types: [new_creation, near_completion, completed]
     wallet_feeds: [smartmoney, kol]   # public smart-money / KOL trade feeds
     wallet_feed_poll_s: 15
     tracked_wallet_poll_s: 30         # for sources.tracked_wallets (GMGN wallet_activity)
-    security_max_per_min: 20          # token security lookups for watchlist tokens
+    security_max_per_min: 10          # token security lookups for watchlist tokens (our chaincheck covers the mint flags)
   dexscreener:
     enabled: true
     boosts_poll_s: 60        # paid boosts / profiles → dex_paid signal
     watch_poll_s: 5          # batch price/liquidity/txns for watchlist tokens (30 per request)
     max_requests_per_min: 240
+  solstream:                 # SolanaStreaming real-time swaps; needs SOLANASTREAMING_API_KEY, skipped otherwise
+    enabled: true
+    max_mints: 25            # held tokens always, then the top of the watchlist
+    wallets: true            # tracked wallets + top whales, real time (GMGN wallet polls are rate limited)
+    daily_messages: 60000    # ~Lite plan (2M/month); free plan is 5k total, set ~150 to just test it
+  gecko:                     # GeckoTerminal, free, no key, 30 calls/min
+    enabled: true
+    trending_poll_s: 120     # trending pools → gecko_trending signal
+    watch_poll_s: 20         # backup prices while DexScreener is stale
+  chaincheck:                # our own rug check from public Solana RPC: mint/freeze authority, Token-2022 traps,
+    enabled: true            # holder shares. Shadow only (chain_* features), compared with GMGN before any rule uses it
+    poll_s: 15
+    top_n: 12
+  bundletrace:               # linked + fresh wallets among top holders, traced on-chain (idea from crawl-hive);
+    enabled: true            # features linked_wallets / linked_pct / fresh_holder_pct; the live watcher blocks obvious bundles
+  pumpfun:                   # pump.fun's own real-time trade feed (the websocket its website uses), free.
+    enabled: true            # Every trade ~1 s after the chain; kept for the top watched coins (held first)
+    max_coins: 150            # Oct 10: 60 was always full of swarm holdings, so new coins (GRAVITY) got no live trades
+    daily_events: 3000000      # the event log is replayed by the swarm, so it is capped; held coins always stay
+    min_sol: 0.0005
+  pumpfun_social:            # pump.fun's Trending board + Hot callouts (caller, called-at mcap, thesis, PnL)
+    enabled: true            # + its PnL leaderboard to tell which callers actually make money
+    trending_poll_s: 60
+    callouts_poll_s: 60
+  news:                      # Google News + Google Trends + Reddit headlines → narrative matching
+    enabled: true
+    poll_s: 300
+    reddit: false            # reddit answers 403 to this homelab's IP; turn on where it works
   jupiter:
     enabled: true
     sol_price_poll_s: 60     # CoinGecko by default; Jupiter Price v3 if JUPITER_API_KEY is set
@@ -49,32 +77,77 @@ sources:
   # (`solmeme login <site>` once) and listen to the traffic the web app receives.
   # Use a throwaway account — automated access is against these sites' terms. NEVER connect a
   # funded wallet or paste a private key into these browser profiles.
-  axiom: {enabled: false, headless: true}
+  axiom: {enabled: false, headless: true}   # Oct 10: logged in, but Pulse sends no data to a headless browser (worker transport); costs ~0.5 GB
   fomo: {enabled: true, headless: true}
   j7tracker: {enabled: true, headless: true}
 
 # Execution realism for paper fills. Pessimistic defaults; tune against live data later.
 fills:
   latency_ms: [400, 1500]        # uniform signal→land delay; fill uses the market state at land time
-  slippage_tolerance_pct: 25     # buy fails if landed price is this much worse than the signal price
+  slippage_tolerance_pct: 10     # buy fails if landed price is this much worse (pump.fun's default max slippage)
   sell_slippage_tolerance_pct: 50
   sell_max_retries: 3            # after this many failed sells, the next one lands at any price
   fail_rate: 0.10                # random tx failure (dropped / expired); bots fail far more than humans
-  priority_fee_sol: 0.001        # paid on every attempt, success or failure (+ 5000 lamports base)
-  jito_tip_sol: 0.0005           # paid only on landed txs
-  platform_fee_pct: 0.5          # execution venue fee per leg (PumpPortal local 0.5%, GMGN/Lightning 1%)
+  # Oct 10 (your call): pump.fun's defaults (0.001 priority + 0.001 MEV tip per tx) were $0.44 a round trip,
+  # 6% of a $7 bet and most of attempt 4's loss. Set the same in pump.fun's Trade settings to match.
+  priority_fee_sol: 0.0002       # paid on every attempt, success or failure (+ 5000 lamports base)
+  jito_tip_sol: 0                # MEV protection off: sandwiches get likelier and costlier (sandwich_*_unprotected)
+  platform_fee_pct: 0            # execution venue fee per leg: none on pump.fun itself (PumpPortal 0.5%, GMGN 1%)
   ata_rent_sol: 0.00204          # token account rent on first buy, refunded when the position closes
   curve_fee_pct: 1.25            # pump.fun bonding-curve fee (0.95% protocol + 0.30% creator)
   # PumpSwap fees step down with market cap (SOL). Approximate tiers: [max_mcap_sol, fee_pct]
   amm_fee_tiers: [[420, 1.25], [2000, 0.95], [20000, 0.60], [98240, 0.45], [1.0e12, 0.30]]
   sandwich_prob: 0.15            # share of buys that get sandwiched ...
   sandwich_extra_pct: 3.0        # ... and land this much worse (capped at the slippage limit)
+  sandwich_prob_unprotected: 0.30         # with no MEV tip: more buys sandwiched (paper and the live dry run) ...
+  sandwich_extra_unprotected_pct: 6.0     # ... for more (still capped at the slippage limit)
   stale_exit_haircut_pct: 30     # forced exit with no fresh price: haircut vs last known price
+  # Paper learns from live: fills are corrected by the real-vs-paper gaps the live dry run measures
+  # (sim/calibration.py). The correction grows with the sample: weight = n / (n + calibration_prior_n).
+  calibrate_from_live: true
+  calibration_prior_n: 30
 
 portfolio:
-  starting_sol: 10.0
-  max_position_sol: 1.0          # hard cap; AI proposals can never exceed it
+  starting_sol: 10.0             # used when starting_usd is unset, and by backtests
+  starting_usd: 50               # live runs: the wallet starts at this many dollars of SOL
+  goal_usd: 100                  # the target the UIs track the wallet against
+  shared_wallet: true            # live runs: every strategy buys from that one wallet (false = a copy each)
+  # Bet size: this % of the wallet's current value per buy (shrinks after losses, grows after wins,
+  # never freezes a small wallet). Remove it to use each strategy's fixed sizing.sol instead.
+  # Swarm agents evolve their own % (5-35) starting from this one.
+  position_pct: 15
+  reserve_sol: 0.01              # cash never spent on buys (sell fees)
+  entry_settle_s: 120           # after a (re)start, no new buys for 2 min while live prices replace warm-start state
+  keep_wallet: true             # a restart continues the champions' wallet (open positions valued at market); ./start begins a new one
+  one_position_per_token: true  # two champions never stack the same token in the shared wallet
+  max_position_sol: 0.45         # ~$50: keeps paper fills realistic for thin meme pools as wallets grow          # hard cap; AI proposals can never exceed it
   daily_loss_limit_sol: 3.0      # strategy stops opening new positions for the UTC day
+
+# Live dry run (solmeme/sim/dryrun.py): a second wallet that starts at a real deposit and copies every
+# champion fill the moment it happens, priced from a real Jupiter quote (our own price impact, the real
+# route, no-route and slippage failures, unsellable coins). The paper wallet keeps its own record; the
+# gap between the two is what paper optimism costs. Nothing is ever signed or sent.
+dryrun:
+  enabled: true
+  start_usd: 50
+  # Execution modeled as pump.fun's own trade panel with its defaults (read Oct 10): max slippage 10%,
+  # priority fee 0.001 SOL, MEV protection tip 0.001 SOL, no venue fee on top of pump.fun's pool fees
+  slippage_tolerance_pct: 10     # a buy priced this much worse than the decision price fails (fee still paid)
+  platform_fee_pct: 0            # pump.fun charges only its pool fees, which the real quote already includes
+  sell_retries: 6                # an unsellable coin is retried this many times, 10 s apart, then counts as 0
+  mark_every_s: 20               # open positions re-valued with a real sell quote (each point on their chart)
+  watcher: true                  # the live wallet's own guard on real prices (dryrun.watcher_* in config.py)
+  loss_limit_pct: 50             # the kill switch a real wallet would have: no new buys after losing this much; a new attempt starts fresh
+  council_review: true           # the council judges every live buy right after it (forensics + narrative); a clear Sell sells it
+  council_reviews_per_day: 30    # ~3 Cursor calls each; paper keeps the strategy's own exits, so the two can be compared
+
+# The Overseer (sim/overseer.py): the last check before the live wallet buys. Paper is never stopped.
+overseer:
+  enabled: true
+  max_data_age_s: 120        # pump.fun live feed or DexScreener quiet this long: no new live buys (no buying blind)
+  day_loss_pct: 100          # off (Oct 10, your call: a $50 wallet swings). The attempt stop (dryrun.loss_limit_pct 50) stays
+  max_exposure_pct: 70       # at most 70% of the wallet in open positions
+  council_loss_streak: 4     # the council's last 4 live picks all lost: council_pick buys pause
 
 # Hard-coded global filter: tokens failing these are never evaluated by any strategy (and never
 # reach the AI). Same rule syntax as strategies. Free, deterministic, runs on every event.
@@ -82,12 +155,36 @@ prefilter:
   enabled: true
   all:
     - {id: has_price, f: secs_since_price, op: "<", v: 300}      # no decisions on stale data
+    # at least one of twitter / telegram / website (DexScreener or GMGN). Unknown counts as none.
+    # Replay of 21h of events (Oct 1-2): no socials won 21.0%, avg -0.018 SOL/trade (457 trades);
+    # with socials 24.8%, avg -0.008 (117). Filter on: 193 trades, -1.9 SOL vs 574 trades, -9.1 SOL off.
+    # Oct 11 (your call, after HOMELESS: one borrowed tweet, no picture): the link must be the coin's own (its X
+    # account or community, a Telegram, a real site), not someone's tweet or a launchpad page. Oct 9 eve - Oct 11:
+    # kol_follow +5.2%/trade on coins with own socials (291) vs -7.2% without (250); all strategies -7.6% vs -13.6%.
+    # A Dexscreener picture/banner needs a paid profile: no edge either way, and it would block ~94% of coins.
+    - {id: no_socials, f: owned_socials_count, op: ">=", v: 1}
   none:
     - {id: rug, f: hard_rug, op: "==", v: true}                  # honeypot / blacklist / extreme concentration
+    - {id: banned, f: banned_wallets, op: ">=", v: 1}            # a banned pump-and-dump wallet created or bought it (solmeme ban list)
     - {id: gmgn_rug, f: gmgn_rug_ratio, op: ">", v: 0.6}
     - {id: dev_dumped, f: dev_sold_pct, op: ">", v: 80}
+    # dev bought 30%+ of the supply in the launch tx (one giant first candle, then a flat chart): 198
+    # trades on 112 such coins Oct 1-9 won 15%, avg -29.7% (under 15%: +1.5% to +7.4%)
+    - {id: dev_launch_bag, f: dev_launch_pct, op: ">=", v: 30}
     - {id: whale_top1, f: top1_pct, op: ">", v: 50}
     - {id: crashed, f: dd_from_ath_pct, op: ">", v: 85}
+    # Oct 11: buy strength, not a falling coin. Honest trades after the fill fix: winners were bought 1-4% under
+    # their high, losers 10-13% under. Replay (honest fills, all champions + trials): Oct 10 06-18:30 -22.55 ->
+    # -9.57 SOL, 18:30-Oct 11 07 -21.88 -> -9.68 SOL; kol_follow positive in both halves only with it.
+    - {id: falling, f: dd_from_ath_pct, op: ">", v: 10}
+    # the same, on pump.fun's own high: our history starts when we first saw the coin (Exlipse: 86% under its
+    # $161k high, but "at its high" for us because we found it after the crash)
+    - {id: falling_pump, f: pump_dd_from_ath_pct, op: ">", v: 10}
+    # Oct 11, Zoroark/CARDS: a pump.fun coin quoted in another meme token; every price we had was in the wrong unit
+    - {id: not_sol_pair, f: pump_quote_sol, op: "==", v: false}
+    # Oct 11 (QKEY: 3.8x in one candle, 47% bundled): no late entries after the big run. Trades on coins already 3x+
+    # from their first price, both halves: all strategies -13.4%/-14.2% vs -6.2%/-8.8% kept; kol_follow -3.3/-9.6 vs +1.8/+2.1
+    - {id: ran_up, f: x_from_first_price, op: ">=", v: 3}
 
 ai:
   # Claude is never in the trading path. It only reviews strategies, and only when the free
@@ -125,6 +222,15 @@ ai:
     key_path: ""
     bin_path: hermes
     workdir: "~"
+  # `solmeme session --every 15`: a free report on the running bot every N minutes. The AI only
+  # reads it when there are new closed trades or new problems; otherwise no call is made.
+  session_review:
+    every_min: 15
+    provider: claude             # claude = Claude Code CLI (`claude -p`, your Claude login) | local = Ollama | none
+    claude_model: sonnet
+    local_url: http://localhost:11434/v1
+    local_model: qwen2.5:1.5b    # small; pull a bigger one (e.g. qwen2.5:7b) for better notes
+    timeout_s: 300
 
 promotion:
   review_window_days: 3          # recorded data used per review (evidence + holdout)
@@ -136,6 +242,79 @@ promotion:
   max_shadow_hours: 72
   bootstrap_conf: 0.90
   bootstrap_iters: 2000
+
+# Strategy swarm (solmeme/lab/evolve.py): a population of paper strategies that evolves.
+# Deterministic, no LLM — costs CPU only. `run` starts a generation every every_min.
+evolution:
+  enabled: true
+  every_min: 60
+  population: 16                # live swarm agents, each on its own paper wallet
+  offspring_per_slot: 6         # children screened by replay per free slot (one replay pass screens them all)
+  lesson_fanout: true           # a species' top new lesson also goes on its best parent at 3 strengths; screening picks
+  tournament: 2                 # parent = best of this many random picks
+  max_species_share: 0.5        # no strategy holds more than half the swarm
+  species_exclude: [launch_sniper, curve_momentum, council_pick]   # sniper learns on its own; council_pick buys what the council picks
+  window_h: 24                  # replay window to score parents and screen children
+  folds: 3                      # walk-forward folds inside it (median score)
+  min_replay_trades: 5
+  shrink_trades: 20             # replay scores shrink toward 0 below this many trades (luck guard)
+  min_live_trades: 8            # live trades before live results judge an agent
+  bust_frac: 0.25               # dead when its wallet drops below 25% of the start
+  kill_bottom_frac: 0.25        # bottom quarter with a losing live record dies each generation
+  kill_min_trades: 4            # from 4 live trades on, an agent losing with 80% confidence dies
+  kill_confidence: 0.8          # (bootstrap of its mean trade %: 4 straight losses is enough, a mixed record is not)
+  idle_kill_h: 12               # dead after this long with no trades while the swarm trades
+  min_free_slots: 2             # turnover: a full swarm of winners retires its 2 weakest (never the top half) so it keeps exploring
+  max_mutations: 3
+  crossover_prob: 0.3
+  auto_promote: false           # paused for the long test run (Oct 8): the champions' wallet stays one continuous record
+
+# Council (solmeme/ai/council.py): LLM judges study why winning coins made money, propose entry
+# rules, and vote. Rules must first pass a replay check on the same trades; approved ones are bred
+# into swarm children and judged by those children's live trades. Never in the buy/sell path.
+council:
+  enabled: true
+  auto_picks: true            # whale clusters (3+ book whales in 10 min) → the council votes → a clear Buy is bought (council_pick)
+  picks_per_day: 40           # ~3 Cursor calls each; coins the global filter blocks are skipped without a call
+  early_picks: true           # fast lane: coins under 3 min old with 2+ of (book whale, KOL, pump.fun callout, 40+ holders)
+  early_picks_per_day: 60     # go to the council first, ahead of whale clusters
+  max_species: 3              # strategies studied per generation (busiest first)
+  min_trades: 20
+  max_ideas_per_member: 2
+  approve_score: 0.5          # confidence- and reputation-weighted share of yes votes
+  judge_min_trades: 20        # carriers' live trades before an idea is called working/failed
+  max_seconds: 1200
+  members:
+    # Cursor panel: Cursor CLI headless (`agent -p --mode ask`, read-only) in LXC 107 behind an OpenAI-style
+    # shim (scripts/cursor_council), 2 runs at a time (each peaks ~410 MB). One judge per model family, so their mistakes are not
+    # all the same; each earns its own reputation. Any id from `agent --list-models` works. Remote judges
+    # answer in parallel; the shim token is CURSOR_COUNCIL_KEY in .env (a judge sits out while it is unset).
+    - {name: cursor-sonnet, kind: openai, base_url: "http://192.168.50.212:8088/v1", model: claude-sonnet-5-5-high, key_env: CURSOR_COUNCIL_KEY, timeout_s: 600}
+    - {name: cursor-gpt, kind: openai, base_url: "http://192.168.50.212:8088/v1", model: gpt-5.6-sol-medium, key_env: CURSOR_COUNCIL_KEY, timeout_s: 600}
+    - {name: cursor-gemini, kind: openai, base_url: "http://192.168.50.212:8088/v1", model: gemini-3.8-flash-high, key_env: CURSOR_COUNCIL_KEY, timeout_s: 600}
+    - {name: cursor-grok, kind: openai, base_url: "http://192.168.50.212:8088/v1", model: grok-4.7-high-fast, key_env: CURSOR_COUNCIL_KEY, timeout_s: 600}
+    - {name: cursor-composer, kind: openai, base_url: "http://192.168.50.212:8088/v1", model: composer-2.5-fast, key_env: CURSOR_COUNCIL_KEY, timeout_s: 600}
+    - {name: cursor-auto, kind: openai, base_url: "http://192.168.50.212:8088/v1", model: auto, key_env: CURSOR_COUNCIL_KEY, timeout_s: 600}      # Cursor's Auto: may use its own usage pool; watch the usage card
+    - name: qwen27b          # homelab GPU VM (RTX 3060); ~2.5 min to load, then ~7 s per answer
+      enabled: false          # dropped Oct 9: can't load in the 6 GB VM ("insufficient memory"); qwen8b is the local backup
+      kind: ollama
+      fallback: true          # local judges are the last line of defense: only asked what Cursor left unanswered
+      base_url: http://192.168.50.205:11434
+      model: hf.co/huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF:UD-Q2_K_XL
+      timeout_s: 420
+    - name: qwen8b            # fast, weaker reasoning
+      kind: ollama
+      fallback: true
+      base_url: http://192.168.50.205:11434
+      model: qwen3:8b
+      timeout_s: 240
+    - name: 9router           # free models via the homelab router; sits out until NINEROUTER_API_KEY is in .env
+      kind: openai
+      fallback: true          # backup only (Oct 9): slowest judge (~220 s, timeouts), no approved idea, reputation -0.5
+      base_url: http://192.168.50.86:20128/v1
+      model: Free_Homelab     # the router's free combo (the NVIDIA models it lists reached end of life)
+      key_env: NINEROUTER_API_KEY
+      timeout_s: 120
 
 # Paper-only online learning. The sniper never sends a transaction.
 sniper:

@@ -1,0 +1,35 @@
+id: holder_dip
+description: >
+  Buy the dip on curve tokens that real holders are piling into. From a scan of every token in
+  Oct 1-2 and Oct 8 data, the GMGN holder count at 30-300s of age was the strongest and most
+  stable predictor of a 2x (AUC 0.76-0.96 in both periods); buying at a fresh high was the worst
+  entry, and 90% of holder-strong tokens dipped 10%+ after a breakout entry. So: wait for a
+  20-70% pullback, aim for 3x, cut at -25%, no trailing stop (it handed back most gains). Costs
+  are ~11% a round trip at this size, so only large moves pay. Replay, fixed 0.065 SOL bets: avg
+  +17%/+15%/+65% a trade in three separate periods (94 trades), median trade -30%: a few 3x
+  winners carry it, so judge it live.
+universe: {pools: [pump, meteoradbc], stage: curve, min_age_s: 30, max_age_s: 900}
+entry:
+  triggers: [enrichment, signal]
+  all:
+    - {id: holders, f: gmgn_holders, op: ">=", v: $min_holders}
+    - {id: liq, f: gmgn_liquidity_usd, op: ">=", v: $min_liq_usd}
+    - {id: dip, f: dd_from_ath_pct, op: between, v: [$dip_min, $dip_max]}
+  none:
+    - {id: rug, f: hard_rug, op: "==", v: true, locked: true}
+    - {id: rugr, f: gmgn_rug_ratio, op: ">", v: 0.5}
+sizing: {sol: 0.1, max_open: 5, max_entries_per_token: 1}
+exits:
+  take_profit: [{at_x: $tp_x, sell_pct: 100}]
+  stop_loss_pct: $sl
+  trailing_pct: null
+  max_hold_s: 1800
+  stale_after_s: 300
+  on_rug: true
+params:
+  min_holders: {value: 40, lo: 15, hi: 300, type: int}
+  min_liq_usd: {value: 8000, lo: 2000, hi: 60000}
+  dip_min: {value: 20, lo: 8, hi: 50}
+  dip_max: {value: 70, lo: 40, hi: 85}
+  tp_x: {value: 3.0, lo: 1.6, hi: 6.0}
+  sl: {value: 25, lo: 10, hi: 50}

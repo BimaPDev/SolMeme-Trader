@@ -78,6 +78,8 @@ class Context:
     watch: object = None                                   # Watchlist
     stats: dict[str, SourceStats] = field(default_factory=dict)
     activity: object = None
+    holders_fn: object = None                              # mint -> {wallet: balance} from the trade stream (the session sets it)
+    whales: set = field(default_factory=set)               # every whale in the book; the session refreshes it
 
     def stat(self, name: str) -> SourceStats:
         return self.stats.setdefault(name, SourceStats())

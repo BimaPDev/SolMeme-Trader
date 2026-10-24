@@ -101,8 +101,22 @@ class ExternalSignal(_Ev):
     data: dict[str, Any] = Field(default_factory=dict)
 
 
+class Headline(_Ev):
+    """A tweet or news headline: narrative context, not tied to one mint. `ticker` / `name` are
+    j7tracker's AI guess at the coin the tweet will spawn (source "j7ai")."""
+    kind: Literal["headline"] = "headline"
+    id: str = ""
+    author: str = ""
+    followers: float | None = None
+    text: str = ""
+    url: str = ""
+    ticker: str = ""
+    name: str = ""
+
+
 Event = Annotated[
-    Union[TokenLaunched, CurveTrade, PoolTrade, Migration, WalletTrade, Enrichment, SolPrice, ExternalSignal],
+    Union[TokenLaunched, CurveTrade, PoolTrade, Migration, WalletTrade, Enrichment, SolPrice, ExternalSignal,
+          Headline],
     Field(discriminator="kind"),
 ]
 EVENT_ADAPTER: TypeAdapter = TypeAdapter(Event)

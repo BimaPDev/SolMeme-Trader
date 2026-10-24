@@ -1,0 +1,31 @@
+id: established_trend
+description: >
+  Trial (paper-only, own wallet). Coins of any age with deep liquidity that are up 20%+ over
+  the last hour and still rising in the last 5 min, with more buys than sells. Tight exits.
+  Backtest on 3 h of fomo-trending coins (2026-10-02): 14 trades, 29% won, -0.007 SOL/trade
+  after fees, -0.002 before fees. Unproven.
+universe: {stage: any}
+entry:
+  triggers: [enrichment]
+  all:
+    - {id: liq, f: dex_liquidity_usd, op: ">=", v: $min_liq}
+    - {id: hour, f: dex_price_chg_h1, op: ">", v: $min_h1}
+    - {id: now, f: dex_price_chg_m5, op: ">", v: $min_m5}
+    - {id: buyp, f: dex_buy_ratio_m5, op: ">=", v: $min_buy_ratio}
+  none:
+    - {id: rug, f: hard_rug, op: "==", v: true, locked: true}
+sizing: {sol: 0.1, max_open: 5, max_entries_per_token: 2}
+exits:
+  take_profit: [{at_x: 1.08, sell_pct: 50}, {at_x: 1.2, sell_pct: 100}]
+  stop_loss_pct: $sl
+  trailing_pct: 5
+  trailing_activate_x: 1.05
+  max_hold_s: 3600
+  stale_after_s: 300
+  on_rug: true
+params:
+  min_liq: {value: 100000, lo: 25000, hi: 5000000}
+  min_h1: {value: 20, lo: 3, hi: 200}
+  min_m5: {value: 2, lo: 0, hi: 30}
+  min_buy_ratio: {value: 1.2, lo: 1.0, hi: 4.0}
+  sl: {value: 7, lo: 3, hi: 30}

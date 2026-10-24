@@ -1,0 +1,18 @@
+[Unit]
+Description=Cursor CLI headless judge (OpenAI-compatible shim for the SolMeme council)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=cursor
+WorkingDirectory=/home/cursor
+EnvironmentFile=/etc/cursor-shim.env
+ExecStart=/usr/bin/python3 /opt/cursor-shim/shim.py
+Restart=always
+RestartSec=5
+MemoryMax=1150M
+NoNewPrivileges=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

@@ -30,12 +30,22 @@ LESSON_MEMORY_S = 14 * 86400
 
 
 def ensure_seeded(store: Store, settings: Settings) -> list[str]:
-    """Register strategies/*.yaml as champions for ids the DB doesn't know yet."""
+    """Register strategies/*.yaml as champions for ids the DB doesn't know yet, and
+    strategies/trials/*.yaml as trials: paper-only on their own wallet until promoted."""
     seeded = []
     for spec in load_dir(settings.strategies_dir):
-        if store.champion(spec.id) is None:
+        if not store.versions(spec.id):        # a demoted (trial) or retired id is not re-seeded as champion
             store.upsert_version(spec.id, spec.version, spec.canonical_json(), "champion", note="seed")
             seeded.append(spec.key)
+    trials = settings.strategies_dir / "trials"
+    for spec in load_dir(trials) if trials.is_dir() else []:
+        if store.champion(spec.id) is not None or store.get_version(spec.id, spec.version):
+            continue            # promoted already, or this exact version was seen (maybe stopped with `kill`)
+        for v in store.versions(spec.id):
+            if v["status"] == "trial":   # the file was edited: the new version replaces the running one
+                store.set_status(spec.id, v["version"], "retired", note=f"trial file changed to {spec.version}")
+        store.upsert_version(spec.id, spec.version, spec.canonical_json(), "trial", note="seed trial")
+        seeded.append(f"{spec.key} (trial)")
     return seeded
 
 
@@ -139,7 +149,8 @@ class Promoter:
             champ = self.store.champion(sid)
             if champ is None:
                 continue
-            since = p["shadow_started_ts"] or p["created_ts"]
+            from solmeme.sim.wallet import trusted_since
+            since = max(p["shadow_started_ts"] or p["created_ts"], trusted_since(self.settings))
             ch_tr = [t for t in self.store.trades(sid, p["challenger_version"], run_mode="live")
                      if (t["entry_ts"] or 0) >= since]
             cp_tr = [t for t in self.store.trades(sid, champ["version"], run_mode="live")
@@ -206,6 +217,15 @@ class Promoter:
             self.store.set_status(strategy_id, cur["version"], "retired", note=f"rolled back to {to_version}")
         self.store.set_status(strategy_id, to_version, "champion", note="rollback")
         return to_version
+
+    def demote(self, strategy_id: str, reason: str = "manual") -> str:
+        """Champion → trial: it keeps trading and seeding the swarm on its own paper wallet, but no
+        longer spends the shared wallet. Undo with `promote`."""
+        cur = self.store.champion(strategy_id)
+        if cur is None:
+            raise ValueError(f"{strategy_id} has no champion")
+        self.store.set_status(strategy_id, cur["version"], "trial", note=f"demoted: {reason}")
+        return cur["version"]
 
     def kill_challenger(self, strategy_id: str, version: str) -> None:
         self.store.set_status(strategy_id, version, "rejected", note="killed manually")

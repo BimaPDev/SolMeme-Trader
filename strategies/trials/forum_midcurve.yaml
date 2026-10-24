@@ -1,0 +1,30 @@
+id: forum_midcurve
+description: >
+  Paper trial. Reddit's 40-60% bonding scalp (r/SolanaMemeCoins, Nov 2025) plus
+  Photon's momentum screen: top 10 under 40%, dev hold under 5%, skip a bundler
+  rate above 30% when GMGN has it. Most of those posts take profit at 1.5-2x
+  and cut around -25%. Own wallet only.
+universe: {pools: [pump], stage: curve, min_age_s: 30, max_age_s: 7200}
+entry:
+  triggers: [curve_trade, enrichment]
+  all:
+    - {id: bond, f: bonding_pct, op: between, v: [$bond_lo, $bond_hi]}
+    - {id: top, f: gmgn_top10_pct, op: "<=", v: $max_top10}
+    - {id: dev, f: dev_hold_pct, op: "<=", v: $max_dev}
+    - {id: holders, f: gmgn_holders, op: ">=", v: 40}
+  none:
+    - {id: rug, f: hard_rug, op: "==", v: true, locked: true}
+    - {id: bundle, f: gmgn_bundler_rate, op: ">", v: 0.3}
+sizing: {sol: 0.1, max_open: 4, max_entries_per_token: 1}
+exits:
+  take_profit: [{at_x: 1.5, sell_pct: 50}, {at_x: 2.0, sell_pct: 100}]
+  stop_loss_pct: 25
+  max_hold_s: 1200
+  stale_after_s: 180
+  on_dev_sell: true
+  on_rug: true
+params:
+  bond_lo: {value: 40, lo: 20, hi: 70}
+  bond_hi: {value: 60, lo: 45, hi: 90}
+  max_top10: {value: 40, lo: 15, hi: 70}
+  max_dev: {value: 5, lo: 1, hi: 30}

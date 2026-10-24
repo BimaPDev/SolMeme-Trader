@@ -10,7 +10,14 @@ from collections import defaultdict
 import numpy as np
 
 
-def _feat_matrix(trades: list[dict]) -> tuple[list[str], np.ndarray]:
+def market_wide() -> set[str]:
+    """Features about the whole market (SOL price, launch rate), not the token: a rule on them only
+    says when the sample happened, so learned rules never use them."""
+    from solmeme.features.registry import FEATURES
+    return {n for n, f in FEATURES.items() if f.group == "regime"}
+
+
+def _feat_matrix(trades: list[dict], drop_market: bool = False) -> tuple[list[str], np.ndarray]:
     rows = []
     for t in trades:
         f = t.get("entry_features") or {}
@@ -19,6 +26,8 @@ def _feat_matrix(trades: list[dict]) -> tuple[list[str], np.ndarray]:
         rows.append(f)
     names = sorted({k for r in rows for k, v in r.items() if isinstance(v, (int, float)) and not isinstance(v, bool)}
                    | {k for r in rows for k, v in r.items() if isinstance(v, bool)})
+    if drop_market:
+        names = [n for n in names if n not in market_wide()]
     X = np.full((len(rows), len(names)), np.nan)
     for i, r in enumerate(rows):
         for j, n in enumerate(names):

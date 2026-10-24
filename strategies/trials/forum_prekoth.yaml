@@ -1,0 +1,29 @@
+id: forum_prekoth
+description: >
+  Paper trial. The March 2025 r/SolanaMemeCoins "pre-KOTH" recipe, using only
+  what the feed can see: 90 seconds to 7 minutes old, market cap $5k-$15k,
+  top 10 under 40%, dev has not sold, and some real buying. Sell half at 2x,
+  the rest at 5x, cut at -25%, and get out if the dev sells. The post also
+  wanted about $750 of volume; that field never reached $750 inside the first
+  7 minutes in this recording, so the activity check is 10 GMGN holders.
+  Own wallet only.
+universe: {pools: [pump], stage: curve, min_age_s: 90, max_age_s: 420}
+entry:
+  triggers: [curve_trade, enrichment]
+  all:
+    - {id: mcap, f: mcap_usd, op: between, v: [5000, 15000]}
+    - {id: top, f: gmgn_top10_pct, op: "<=", v: 40}
+    - {id: dev, f: dev_sold, op: "==", v: false}
+    - {id: holders, f: gmgn_holders, op: ">=", v: 10}
+  none:
+    - {id: rug, f: hard_rug, op: "==", v: true, locked: true}
+    - {id: snipers, f: gmgn_sniper_count, op: ">", v: 8}
+sizing: {sol: 0.1, max_open: 4, max_entries_per_token: 1}
+exits:
+  take_profit: [{at_x: 2.0, sell_pct: 50}, {at_x: 5.0, sell_pct: 100}]
+  stop_loss_pct: 25
+  max_hold_s: 900
+  stale_after_s: 120
+  on_dev_sell: true
+  on_rug: true
+params: {}

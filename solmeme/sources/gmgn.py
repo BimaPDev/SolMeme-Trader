@@ -130,10 +130,16 @@ def normalize_activity(item: dict, label: str) -> WalletTrade | None:
 
 
 class Gmgn:
+    _bucket: TokenBucket | None = None      # one per process: every client shares the key's rate limit
+
     def __init__(self, ctx: Context):
         self.ctx = ctx
         self.cfg = ctx.settings.sources.gmgn
-        self.bucket = TokenBucket(self.cfg.rate_per_s, capacity=max(2.0, self.cfg.rate_per_s))
+        # Oct 10: the 10-minute boards scan made its own Gmgn with a fresh bucket, so its burst landed on top of
+        # the feeds, GMGN answered 429 to everything and the KOL feed (kol_follow's trigger) backed off for minutes
+        if Gmgn._bucket is None:
+            Gmgn._bucket = TokenBucket(self.cfg.rate_per_s, capacity=max(2.0, self.cfg.rate_per_s))
+        self.bucket = Gmgn._bucket
         self.seen_signal: set[tuple[str, str]] = set()
         self.seen_tx: set[str] = set()
         self.security_done: set[str] = set()
@@ -147,11 +153,20 @@ class Gmgn:
         headers = {"X-APIKEY": key, "Content-Type": "application/json", "Accept": "application/json",
                    "User-Agent": "SolMemeTrader/0.1"}
         resp = await self.ctx.http.request(method, HOST + path, params=q, json=body, headers=headers, timeout=25)
+        self._adapt(resp.status_code)
         resp.raise_for_status()
         payload = resp.json()
         if isinstance(payload, dict) and payload.get("code") not in (0, None):
             raise RuntimeError(f"GMGN error code={payload.get('code')} msg={payload.get('message') or payload.get('error')}")
         return payload.get("data", payload) if isinstance(payload, dict) else payload
+
+    def _adapt(self, status: int) -> None:
+        """GMGN doesn't publish its limit: back off 30% on every 429, creep back up while calls succeed."""
+        b = self.bucket
+        if status == 429:
+            b.rate = max(self.cfg.rate_per_s * 0.15, b.rate * 0.7)
+        elif status < 400 and b.rate < self.cfg.rate_per_s:
+            b.rate = min(self.cfg.rate_per_s, b.rate + self.cfg.rate_per_s * 0.01)
 
     # ── trenches ──
     async def poll_trenches(self) -> None:

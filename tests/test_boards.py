@@ -3,7 +3,7 @@
 import asyncio
 
 from solmeme.lab.boards import (
-    copy_buys, looks_like_instruction, narrative_from_info, normalize_pump, page_title,
+    copy_buys, looks_like_instruction, narrative_from_info, normalize_pump, page_title, pump_lists,
     render_card, score_token, snapshot, trending_rows,
 )
 from solmeme.sim.curve import INITIAL_REAL_TOKENS, INITIAL_V_TOKENS
@@ -115,7 +115,7 @@ def test_snapshot_lists_pump_and_cards_the_almost_column():
 
     async def pump_get(params):
         assert params["includeNsfw"] == "false"
-        if params["complete"] == "false" and params["sort"] == "market_cap":
+        if params["complete"] == "false" and params["sort"] == "last_trade_timestamp":
             return [{"mint": MINT, "symbol": "OTTR", "name": "Otter", "description": "otter pictures",
                      "usd_market_cap": 40000, "complete": False, "virtual_token_reserves": half,
                      "twitter": "https://x.com/otter", "website": "https://example.com/otter",
@@ -136,3 +136,22 @@ def test_snapshot_lists_pump_and_cards_the_almost_column():
     assert snap["cards"][0]["verdict"] == "research"
     assert "pump.fun" in text and "bonding 80%" in text and "otter pictures" in text
     assert "bought by" not in text
+
+
+def test_pump_almost_keeps_only_coins_still_on_the_curve():
+    def coin(sym, bond, **extra):
+        v_tok = (INITIAL_V_TOKENS - bond / 100 * INITIAL_REAL_TOKENS) * 1e6
+        return {"mint": sym * 4, "symbol": sym, "usd_market_cap": 30000, "complete": False,
+                "virtual_token_reserves": v_tok, **extra}
+
+    raw = [
+        coin("LOW", 40),
+        coin("OLD", 99.5, pump_swap_pool="Pool1111"),       # migrated long ago, still flagged not complete
+        coin("RAY", 99.0, raydium_pool="Pool2222"),
+        coin("HIGH", 95),
+        {"mint": "FLATFLAT", "symbol": "FLAT", "usd_market_cap": 18_000_000,
+         "virtual_token_reserves": INITIAL_V_TOKENS * 1e6},  # unknown progress
+        coin("MID", 70),
+    ]
+    rows = pump_lists({"almost": raw}, 3)["almost"]
+    assert [r["symbol"] for r in rows] == ["HIGH", "MID", "LOW"]

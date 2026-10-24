@@ -57,7 +57,7 @@ def daily_report(settings: Settings, store: Store, days: float = 7) -> Path:
         "|---|---|---|---|---|",
     ]
     for v in versions:
-        if v["status"] in ("champion", "challenger") or v["status_ts"] >= since:
+        if v["status"] in ("champion", "challenger", "trial") or v["status_ts"] >= since:
             lines.append(f"| {v['strategy_id']} | `{v['version']}` | {v['status']} | {_iso(v['status_ts'])} | "
                          f"{(v['note'] or '')[:80]} |")
     lines += ["", "## Proposals", "", "| when | strategy | status | hypothesis | outcome |", "|---|---|---|---|---|"]

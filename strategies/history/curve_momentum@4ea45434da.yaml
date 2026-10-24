@@ -1,4 +1,4 @@
-# promoted 2026-10-01 08:04:57 — shadow edge +0.0600 SOL/trade (CI +0.0567..+0.0633)
+# promoted 2026-10-11 21:33:49 — shadow edge +0.0600 SOL/trade (CI +0.0567..+0.0633)
 id: curve_momentum
 description: 'Early pump.fun bonding-curve momentum. Needs the PumpPortal trade stream
   for the token (flow + holder features). Buys broad, organic demand (many distinct
@@ -45,12 +45,18 @@ entry:
     op: ==
     v: true
     locked: true
+  score: []
+  min_score: null
   triggers:
   - curve_trade
 sizing:
   sol: 0.1
+  pct: null
+  boost_whales: null
+  boost_x: 1.0
   max_open: 5
   max_entries_per_token: 1
+  score_x: null
 exits:
   take_profit:
   - at_x: 2.0

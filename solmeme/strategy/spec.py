@@ -36,10 +36,19 @@ class Cond(BaseModel):
         return self
 
 
+class ScoreTerm(Cond):
+    """One ingredient of a confidence score: when the condition holds it adds `w` points (missing data adds 0)."""
+    w: float | str = 1.0
+
+
 class Entry(BaseModel):
     all: list[Cond] = []
     any: list[Cond] = []
     none: list[Cond] = []
+    # a confidence score on top of the gates: buy only when the passing terms add up to min_score.
+    # Unlike `all`, one missing or weak signal doesn't block; the rest can make up for it.
+    score: list[ScoreTerm] = []
+    min_score: float | str | None = None
     # event kinds that trigger an entry evaluation for the touched token
     triggers: list[str] = ["curve_trade", "pool_trade", "enrichment", "wallet_trade", "signal"]
 
@@ -89,8 +98,18 @@ class Universe(BaseModel):
 
 class Sizing(BaseModel):
     sol: float | str = 0.1
+    # % of the wallet's current value per buy; overrides `sol`. Unset = portfolio.position_pct.
+    # Only the swarm sets it (a gene in [5, 35]); the AI can never change sizing.
+    pct: float | None = None
+    # Bet boost_x times more when at least boost_whales trusted whales (lab/whales.py) bought the token in
+    # the last 10 minutes. Only the swarm sets these genes (1-3 whales, 1-2.5x); the AI never changes sizing.
+    boost_whales: int | None = None
+    boost_x: float = 1.0
     max_open: int = 5
     max_entries_per_token: int = 1
+    # with a score: bet up to score_x times the normal size as the score climbs from min_score to the
+    # most it can reach (sum of the weights). Only the swarm and you set it; the AI never changes sizing.
+    score_x: float | None = None
 
 
 class StrategySpec(BaseModel):
@@ -107,14 +126,25 @@ class StrategySpec(BaseModel):
         for ref in _param_refs(self.model_dump(exclude={"params"})):
             if ref not in self.params:
                 raise ValueError(f"{self.id}: references undefined param ${ref}")
-        ids = [c.id for _, c in self.entry.rules()]
+        ids = [c.id for _, c in self.entry.rules()] + [t.id for t in self.entry.score]
         if len(ids) != len(set(ids)):
             raise ValueError(f"{self.id}: duplicate rule ids")
         return self
 
     # ── identity ──
     def canonical_json(self) -> str:
-        return json.dumps(self.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+        d = self.model_dump(mode="json")
+        if d["sizing"].get("pct") is None:
+            d["sizing"].pop("pct", None)        # unset → same version hash as before the field existed
+        if d["sizing"].get("boost_whales") is None:
+            d["sizing"].pop("boost_whales", None)   # same for the whale boost: no boost, old hash
+            d["sizing"].pop("boost_x", None)
+        if d["sizing"].get("score_x") is None:
+            d["sizing"].pop("score_x", None)        # strategies without a score keep their version hash
+        if not d["entry"].get("score") and d["entry"].get("min_score") is None:
+            d["entry"].pop("score", None)
+            d["entry"].pop("min_score", None)
+        return json.dumps(d, sort_keys=True, separators=(",", ":"))
 
     @property
     def version(self) -> str:

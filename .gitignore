@@ -9,3 +9,6 @@ reports/
 data-demo/
 logs/
 tui/solmeme-tui
+
+# website source deps (the built site lives in web/)
+webapp/node_modules/

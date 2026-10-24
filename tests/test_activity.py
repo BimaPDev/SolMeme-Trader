@@ -70,6 +70,9 @@ def test_board_sections_dedup_and_symbols():
     ]
     assert rows[0].ts == now
     assert rows[1].ts == 900 and rows[1].source == "exit"
+    aged = act.board(watch, symbols, held, now, opened={"OPEN": 100})
+    assert aged[0].ts == 100
+    assert next(row for row in aged if row.mint == "WATCH").ts == 600
 
 
 def test_short_mint_and_age_label():

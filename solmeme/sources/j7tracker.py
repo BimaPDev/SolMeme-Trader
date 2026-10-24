@@ -37,7 +37,7 @@ import json
 import re
 from typing import Any
 
-from solmeme.core.events import ExternalSignal
+from solmeme.core.events import ExternalSignal, Headline
 from solmeme.sources.browser import BrowserSource
 
 _ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
@@ -64,11 +64,13 @@ _TWEET_EVENTS = {"tweet", "tweet_update", "tweet.subtweet.update", "quoted_tweet
 _LAUNCH_EVENTS = {"vamp_trigger", "vamp_update_trigger"}
 _META_EVENTS = {"token_meta"}
 _CARD_EVENTS = {"feed_card", "feed_cards"}
+_AI_EVENTS = {"ai_suggestion"}                 # j7's AI guess at the coin a tweet will spawn
 _NOISE_EVENTS = {
     "connect", "disconnect", "connect_error", "connected_users", "auth_error", "error",
     "debug_response", "buy_success", "buy_error", "pnl_update", "user_connected",
     "hidden_accounts_updated", "admin_alert", "admin_alert_clear", "deploy_success",
-    "sell_result", "tracked_fomo", "tracked_pump", "tracked_telegram",
+    "sell_result", "tracked_fomo", "tracked_pump", "tracked_telegram", "ai_suggestion_update",
+    "tracked_subdomain", "following_update", "follow_scan", "tweet_deleted", "status",
 }
 
 
@@ -288,6 +290,41 @@ def parse_tweet(tweet: dict, *, signal: str = "j7_tweet_ca") -> list[ExternalSig
         return []
 
 
+def headline_from_tweet(tweet: dict) -> list[Headline]:
+    """Every tweet is narrative context, contract address or not. Never raises."""
+    try:
+        if not isinstance(tweet, dict):
+            return []
+        text = (tweet.get("text") or tweet.get("full_text") or tweet.get("body") or "")
+        quoted = tweet.get("quotedTweet") or tweet.get("quoted_status")
+        if isinstance(quoted, dict) and isinstance(quoted.get("text"), str):
+            text = f"{text}\n> {quoted['text']}"
+        text = str(text).strip()
+        if not text:
+            return []
+        author_obj = tweet.get("author") if isinstance(tweet.get("author"), dict) else tweet.get("user")
+        return [Headline(ts=0.0, source="j7tracker", id=_tweet_id(tweet), author=_handle(author_obj),
+                         followers=_followers(author_obj), text=text[:400],
+                         url=str(tweet.get("tweetUrl") or tweet.get("tweet_url") or tweet.get("url") or ""))]
+    except Exception:
+        return []
+
+
+def parse_ai_suggestion(msg: dict) -> list[Headline]:
+    """{"tweet_url", "prediction", "ticker", "tweet_id", ...} → the coin j7 expects the tweet to spawn."""
+    try:
+        if not isinstance(msg, dict):
+            return []
+        name = str(msg.get("prediction") or "").replace("\u2060", "").strip()
+        ticker = str(msg.get("ticker") or msg.get("ai_ticker") or "").replace("\u2060", "").strip()
+        if not (name or ticker):
+            return []
+        return [Headline(ts=0.0, source="j7ai", id=f"{msg.get('tweet_id') or ''}:{ticker}", text=name,
+                         url=str(msg.get("tweet_url") or ""), ticker=ticker[:20], name=name[:80])]
+    except Exception:
+        return []
+
+
 def _mint_from_coin(coin: dict) -> str | None:
     if not isinstance(coin, dict):
         return None
@@ -424,6 +461,8 @@ def events_from(event: str, data, *, signal_for_tweet: str = "j7_tweet_ca") -> t
         for item in items:
             events.extend(parse_tweet(item, signal=signal_for_tweet))
         return events, True
+    if event in _AI_EVENTS:
+        return [], True                        # headlines_from() reads these
     if event in _META_EVENTS:
         items = data if isinstance(data, list) else [data]
         events = []
@@ -437,6 +476,32 @@ def events_from(event: str, data, *, signal_for_tweet: str = "j7_tweet_ca") -> t
             events.extend(parse_launch(item))
         return events, True
     return [], False
+
+
+def headlines_from(payload, seen: set | None = None) -> list[Headline]:
+    """Every tweet and every AI coin guess in one frame, as narrative Headlines. Never raises."""
+    try:
+        out = []
+        for name, data in iter_socketio(payload):
+            items = data if isinstance(data, list) else [data]
+            if name in _TWEET_EVENTS:
+                found = [h for item in items for h in headline_from_tweet(item)]
+            elif name in _AI_EVENTS:
+                found = [h for item in items for h in parse_ai_suggestion(item)]
+            else:
+                continue
+            for h in found:
+                key = (h.source, h.id or h.text[:120])
+                if seen is not None:
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                out.append(h)
+        if seen is not None and len(seen) > 50_000:
+            seen.clear()
+        return out
+    except Exception:
+        return []
 
 
 def _allow_authors(authors) -> set[str]:
@@ -497,6 +562,7 @@ class Source(BrowserSource):
     def __init__(self, ctx):
         super().__init__(ctx)
         self._stats = MintStats()
+        self._headlines: set = set()
 
     def _params(self) -> tuple[float, list]:
         try:
@@ -516,7 +582,7 @@ class Source(BrowserSource):
             payload, min_followers=min_followers, authors=authors, stats=self._stats)
         if not recognized:
             self.sample("ws", url, payload)
-        return events
+        return events + headlines_from(payload, self._headlines)
 
     def on_http(self, url, data) -> list:
         # The feed is socket.io over a websocket. Polling responses, when they

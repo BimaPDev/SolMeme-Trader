@@ -1,0 +1,31 @@
+id: established_dip
+description: >
+  Trial (paper-only, own wallet). Coins of any age with deep liquidity that dropped 8%+ over
+  the last hour and are turning up in the last minute. Quick scalp exits. Backtest on 3 h of
+  fomo-trending coins (2026-10-02): 20 trades, 5% won, -0.007 SOL/trade after fees, -0.002
+  before fees. Unproven; here to test whether dips on big coins bounce.
+universe: {stage: any}
+entry:
+  triggers: [enrichment]
+  all:
+    - {id: liq, f: dex_liquidity_usd, op: ">=", v: $min_liq}
+    - {id: dip, f: dex_price_chg_h1, op: "<", v: $max_h1}
+    - {id: turn, f: price_chg_60s_pct, op: ">", v: $min_turn}
+    - {id: buyp, f: dex_buy_ratio_m5, op: ">=", v: $min_buy_ratio}
+  none:
+    - {id: rug, f: hard_rug, op: "==", v: true, locked: true}
+sizing: {sol: 0.1, max_open: 5, max_entries_per_token: 2}
+exits:
+  take_profit: [{at_x: 1.05, sell_pct: 50}, {at_x: 1.1, sell_pct: 100}]
+  stop_loss_pct: $sl
+  trailing_pct: 4
+  trailing_activate_x: 1.04
+  max_hold_s: 3600
+  stale_after_s: 300
+  on_rug: true
+params:
+  min_liq: {value: 100000, lo: 25000, hi: 5000000}
+  max_h1: {value: -8, lo: -60, hi: -2}
+  min_turn: {value: 0.5, lo: 0, hi: 10}
+  min_buy_ratio: {value: 1.0, lo: 0.5, hi: 4.0}
+  sl: {value: 6, lo: 3, hi: 30}

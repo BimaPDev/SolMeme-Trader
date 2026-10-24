@@ -3,6 +3,7 @@
   check                     test every data source + credentials
   boards                    print Trenches, Trending, CopyTrade, pump.fun, and a card per buy
   people [QUERY]            find wallets to paper-copy, or look one up by name or address
+  trace ADDRESS            who funded a wallet, who it paid, and what those wallets are
   setup                     ask for API keys once and save them in .env
   record                    ingest + event log only
   run [--ui normal|tui|web] live paper trading. normal is the rich log; tui is Bubble Tea; web is localhost
@@ -13,9 +14,14 @@
   optimize STRATEGY         optuna walk-forward param search → proposal (gated like AI proposals)
   review [STRATEGY]         AI review now (--dry-run prints the evidence pack, no API call)
   ai-cycle                  shadow gate + due reviews (what `run` schedules every 10 min)
+  evolve                    one swarm generation: kill losers, learn, breed, screen (what `run` schedules hourly)
+  swarm                     the swarm leaderboard and what the last generation did
+  council                   LLM judges and their ideas: proposed rules, votes, how carriers did live
+  ban list|add|remove       pump-and-dump wallets the bot never buys alongside
   strategies / show         list versions / print a spec
-  promote / rollback / kill manual champion control
+  promote / rollback / kill / demote   manual champion control (demote: champion → trial, off the shared wallet)
   report                    markdown report → <data>/reports/
+  session [--every 15]      report on the running bot; --ai claude|local adds a note when something changed
   synth                     write a synthetic market into the event log (demo / tests)
 """
 
@@ -48,6 +54,29 @@ def main(data_dir: Optional[Path] = typer.Option(None, "--data-dir", help="Use a
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 
+def _live_lock(s):
+    """Hold data/live.lock for this process, or exit if another live session already holds it.
+
+    Two sessions at once each record every event into the log, so replays would see them twice.
+    """
+    import fcntl
+
+    fh = open(s.data_dir / "live.lock", "a+")
+    try:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        fh.seek(0)
+        pid = fh.read().strip() or "?"
+        console.print(f"[red]another session is already running (pid {pid}). Stop it first (Ctrl+C in its "
+                      f"terminal, or kill {pid}).[/red]")
+        raise typer.Exit(1)
+    fh.seek(0)
+    fh.truncate()
+    fh.write(str(os.getpid()))
+    fh.flush()
+    return fh
+
+
 def _ctx():
     from solmeme.ai.promoter import ensure_seeded
     from solmeme.config import load_settings
@@ -57,7 +86,10 @@ def _ctx():
     store = Store(s.db_path)
     seeded = ensure_seeded(store, s)
     for k in seeded:
-        console.print(f"[green]seeded champion[/green] {k}")
+        if k.endswith(" (trial)"):
+            console.print(f"[green]seeded trial[/green] {k[:-8]} [dim](paper-only, own wallet)[/dim]")
+        else:
+            console.print(f"[green]seeded champion[/green] {k}")
     return s, store
 
 
@@ -354,6 +386,50 @@ def people(query: Optional[str] = typer.Argument(None, help="Wallet address or n
         console.print(Panel(card["text"], border_style=color))
 
 
+@app.command()
+def trace(address: str = typer.Argument(..., help="Solana wallet address"),
+          hops: int = typer.Option(2, min=1, max=2, help="2 follows the largest counterparties one step. 1 stops at direct links."),
+          limit: int = typer.Option(100, min=1, max=300, help="How many of the wallet's newest transactions to read")):
+    """Follow SOL and token transfers, then label the wallets on the other side. No transactions are sent."""
+    import httpx
+
+    from solmeme.config import load_settings
+    from solmeme.lab.forensics import identify_wallet, investigate, load_history
+    from solmeme.lab.people import is_address
+    from solmeme.sources.base import Context
+    from solmeme.sources.gmgn import Gmgn, available
+
+    address = address.strip()
+    if not is_address(address):
+        console.print("[red]trace needs a wallet address.[/red] A name search is `solmeme people <name>`.")
+        raise typer.Exit(1)
+    s = load_settings()
+    gmgn_on = available()
+
+    async def go():
+        async with httpx.AsyncClient(timeout=40, follow_redirects=True) as http:
+            gmgn = Gmgn(Context(settings=s, http=http, emit=lambda *a, **k: None)) if gmgn_on else None
+            req = gmgn._req if gmgn else None
+
+            async def fetch(addr, tx_limit):
+                return await load_history(http, addr, tx_limit)
+
+            async def identify(addr):
+                return await identify_wallet(req, addr)
+
+            return await investigate(fetch, identify, address, hops=hops, tx_limit=limit)
+
+    try:
+        report = asyncio.run(go())
+    except Exception as e:
+        console.print(f"[red]trace failed[/red] {e}")
+        raise typer.Exit(1)
+    console.print(Panel(report["text"], title="wallet trace", border_style="cyan"))
+    console.print("[dim]public chain history only · nothing is sent[/dim]")
+    if hops < 2 and report["summary"]["counterparties"]:
+        console.print("[dim]Follow the money one step further with --hops 2[/dim]")
+
+
 def _usd(x) -> str:
     return "" if x is None else f"${x:,.0f}"
 
@@ -423,6 +499,7 @@ def record(minutes: Optional[float] = typer.Option(None, help="Stop after N minu
     from solmeme.sim.live import LiveSession
 
     s = load_settings()
+    lock = _live_lock(s)  # noqa: F841 - held until the process exits
     console.print(f"[bold]recording[/bold] → {s.events_dir}  (Ctrl-C to stop)")
     try:
         asyncio.run(LiveSession(s, None, None, console).run(minutes))
@@ -434,7 +511,13 @@ def record(minutes: Optional[float] = typer.Option(None, help="Stop after N minu
 def run(minutes: Optional[float] = typer.Option(None, help="Stop after N minutes"),
         ai: bool = typer.Option(True, "--ai/--no-ai", help="Schedule AI cycles (shadow gate + reviews)"),
         warmup_min: float = typer.Option(45, help="Rebuild state by replaying the last N minutes of the log"),
-        ui: str = typer.Option("normal", "--ui", help="normal (rich log), tui (Bubble Tea), or web (localhost)")):
+        ui: str = typer.Option("normal", "--ui", help="normal (rich log), tui (Bubble Tea), or web (localhost)"),
+        fresh: bool = typer.Option(True, "--fresh/--resume",
+                                   help="Fresh (default): a new wallet, the warm start loads market data only. "
+                                        "Resume: replay recent trades to restore open positions"),
+        usd: Optional[float] = typer.Option(None, "--usd", help="Starting wallet in dollars (overrides settings)"),
+        new_wallet: bool = typer.Option(False, "--new-wallet", help="Start the champions' wallet over instead of continuing it"),
+        goal: Optional[float] = typer.Option(None, "--goal", help="Wallet goal in dollars (overrides settings)")):
     """Live paper trading: record + run every champion and challenger on the same stream."""
     from solmeme.ai.promoter import active_specs
     from solmeme.sim.live import LiveSession
@@ -444,6 +527,14 @@ def run(minutes: Optional[float] = typer.Option(None, help="Stop after N minutes
         console.print("[red]--ui must be normal, tui, or web[/red]")
         raise typer.Exit(1)
     s, store = _ctx()
+    lock = _live_lock(s)  # noqa: F841 - held until the process exits
+    if usd is not None:
+        if usd <= 0:
+            console.print("[red]--usd must be more than 0[/red]")
+            raise typer.Exit(1)
+        s.portfolio.starting_usd = usd
+    if goal is not None:
+        s.portfolio.goal_usd = goal
     specs = active_specs(store)
     out = console
     log_file = None
@@ -459,7 +550,8 @@ def run(minutes: Optional[float] = typer.Option(None, help="Stop after N minutes
                + ", ".join(f"{sp.key} ({lbl})" for sp, lbl in specs))
     out.print(summary)
     out.print("[dim]also scanning boards and wallets, then again every 10 min[/dim]")
-    session = LiveSession(s, store, specs, out, warmup_min=warmup_min, ai=ai, ui=ui)
+    session = LiveSession(s, store, specs, out, warmup_min=warmup_min, ai=ai, ui=ui, fresh=fresh,
+                          new_wallet=new_wallet or usd is not None)
     try:
         if ui != "normal":
             from solmeme.ui.launch import UiError, attach
@@ -467,7 +559,7 @@ def run(minutes: Optional[float] = typer.Option(None, help="Stop after N minutes
                 attach(session, ui)
             except UiError as exc:
                 console.print(f"[red]{exc}[/red]")
-                session.writer.close()
+                session._save()
                 raise typer.Exit(1)
         asyncio.run(session.run(minutes))
     except KeyboardInterrupt:
@@ -773,6 +865,152 @@ def ai_cycle_cmd(force: bool = typer.Option(False, help="Review every champion n
     ai_cycle(s, store, force=force, log_fn=console.print)
 
 
+@app.command()
+def evolve(generations: int = typer.Option(1, help="How many generations to run"),
+           every: Optional[float] = typer.Option(None, help="Minutes between generations (default: back to back)")):
+    """Strategy swarm: kill agents that bust or lose, learn from their trades, breed and screen new ones."""
+    from solmeme.core.eventlog import read_events
+    from solmeme.lab.evolve import evolve_once, recorded_folds, report_markdown
+    from solmeme.sim.wallet import fetch_sol_usd, logged_sol_usd
+
+    try:
+        os.nice(10)                       # the live bot shares this machine; replays must not starve it
+    except OSError:
+        pass
+    s, store = _ctx()
+    for i in range(generations):
+        if i and every:
+            time.sleep(every * 60)
+        px = logged_sol_usd(s) or fetch_sol_usd()
+        start_sol = s.portfolio.starting_usd / px if s.portfolio.starting_usd and px else None
+        console.print(f"[{datetime.now().strftime('%H:%M:%S')}] swarm generation {store.evo_generation() + 1}")
+        folds = recorded_folds(s.events_dir, s.evolution.window_h, s.evolution.folds)
+        gen = store.evo_generation() + 1
+        status = s.data_dir / "session" / "evolve.json"
+        status.parent.mkdir(parents=True, exist_ok=True)
+
+        def phase(name: str, gen=gen, started=time.time()) -> None:
+            status.write_text(json.dumps({"gen": gen, "phase": name, "started": started, "ts": time.time()}))
+
+        rep = evolve_once(s, store, lambda a, b: read_events(s.events_dir, a, b), start_sol=start_sol,
+                          folds=folds, phase_fn=phase, log_fn=console.print)
+        md = report_markdown(rep)
+        out = s.reports_dir / "evolution"
+        out.mkdir(parents=True, exist_ok=True)
+        (out / f"gen-{rep.gen:04d}.md").write_text(md, encoding="utf-8")
+        (out / "latest.md").write_text(md, encoding="utf-8")
+        console.print(f"generation {rep.gen}: {len(rep.born)} born, {len(rep.killed)} killed, "
+                      f"{rep.screened_out} screened out, {len(rep.promoted)} promoted in {rep.seconds:.0f}s "
+                      f"→ {out / 'latest.md'}")
+
+
+@app.command()
+def swarm():
+    """The swarm leaderboard from the last generation."""
+    s, store = _ctx()
+    rows = store.evo_scores()
+    if not rows:
+        console.print("no generation yet: run `solmeme evolve` (or `solmeme run`, which starts one every "
+                      f"{s.evolution.every_min:.0f} min)")
+        return
+    t = Table(title=f"swarm generation {rows[0]['gen']}")
+    for c in ("#", "strategy", "role", "fitness", "replay", "replay trades", "live trades", "live PnL SOL", "wallet"):
+        t.add_column(c)
+    for i, r in enumerate(rows, 1):
+        t.add_row(str(i), r["key"], r["role"], f"{r['fitness']:+.1f}", f"{r['replay']:+.1f}", str(r["replay_n"]),
+                  "" if r["live_n"] is None else str(r["live_n"]),
+                  "" if r["live_pnl_sol"] is None else f"{r['live_pnl_sol']:+.3f}",
+                  "" if r["equity"] is None else f"{r['equity']:.0%}")
+    console.print(t)
+    dead = [v for v in store.versions() if v["status"] == "dead"]
+    console.print(f"[dim]{len(dead)} dead so far · report: {s.reports_dir / 'evolution' / 'latest.md'}[/dim]")
+
+
+@app.command("reset-wallets")
+def reset_wallets_cmd():
+    """Start every wallet over at the starting amount (champions and swarm agents), keeping all history.
+    Stop the bot first; it starts fresh on the next start."""
+    from solmeme.sim.wallet import reset_wallets
+
+    s, _ = _ctx()
+    ts = reset_wallets(s)
+    console.print(f"wallets reset at {datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')}: every wallet starts at "
+                  f"${s.portfolio.starting_usd or 0:,.0f} on the next start; trades, family trees and stats are kept")
+
+
+@app.command("council")
+def council_cmd():
+    """The council's judges and ideas (sittings run inside each swarm generation)."""
+    from solmeme.ai.council import available, judge_ideas, reputations
+
+    s, store = _ctx()
+    judge_ideas(store, s, time.time())
+    reps = reputations(store)
+    t = Table(title="judges")
+    for c in ("judge", "model", "ready", "reputation"):
+        t.add_column(c)
+    for m in s.council.members:
+        t.add_row(m.name, m.model or "(no model set)", "yes" if available(m) else "no",
+                  "" if m.name not in reps else f"{reps[m.name]:+.2f}")
+    console.print(t)
+    t = Table(title="ideas")
+    for c in ("strategy", "rule", "by", "score", "status", "why"):
+        t.add_column(c)
+    for i in reversed(store.council_ideas()[-30:]):
+        verb = "require" if i["kind"] == "require" else "avoid"
+        t.add_row(i["strategy_id"], f"{verb} {i['feature']} {i['op']} {i['v']:g}", i["proposed_by"],
+                  "" if i["score"] is None else f"{i['score']:.2f}", i["status"], (i["status_reason"] or "")[:60])
+    console.print(t)
+
+
+ban_app = typer.Typer(help="Pump-and-dump wallets: tokens they create or buy are never bought.")
+app.add_typer(ban_app, name="ban")
+
+
+@ban_app.command("list")
+def ban_list():
+    """Show the ban list."""
+    from solmeme.lab.banlist import BanList
+
+    s, _ = _ctx()
+    bans = BanList(s.data_dir)
+    t = Table(title=f"{len(bans.bans)} banned wallets")
+    for c in ("wallet", "role", "source", "added", "reason"):
+        t.add_column(c)
+    for b in sorted(bans.bans.values(), key=lambda b: -b.ts):
+        t.add_row(b.address, b.role, b.source, datetime.fromtimestamp(b.ts).strftime("%m-%d %H:%M"), b.reason[:70])
+    console.print(t)
+
+
+@ban_app.command("add")
+def ban_add(address: str, reason: str = typer.Option(..., help="Why (kept with the entry)"),
+            role: str = typer.Option("manual", help="creator | cluster | funder | operation | manual")):
+    """Ban a wallet. The running bot picks it up within a minute."""
+    from solmeme.lab.banlist import BanList
+    from solmeme.lab.people import is_address
+
+    if not is_address(address):
+        console.print("[red]not a Solana address[/red]")
+        raise typer.Exit(1)
+    s, _ = _ctx()
+    bans = BanList(s.data_dir)
+    added = bans.add(address, role, reason)
+    bans.save()
+    console.print(("banned " if added else "already banned ") + address)
+
+
+@ban_app.command("remove")
+def ban_remove(address: str):
+    """Take a wallet off the ban list."""
+    from solmeme.lab.banlist import BanList
+
+    s, _ = _ctx()
+    bans = BanList(s.data_dir)
+    ok = bans.remove(address)
+    bans.save()
+    console.print(("removed " if ok else "not on the list: ") + address)
+
+
 # ── strategy control ──────────────────────────────────────────────────────────
 @app.command()
 def strategies(strategy: Optional[str] = typer.Argument(None)):
@@ -820,6 +1058,31 @@ def rollback(strategy: str, to: Optional[str] = typer.Option(None, "--to", help=
     console.print(f"{strategy} champion is now {v}")
 
 
+@app.command("new-attempt")
+def new_attempt(why: str = typer.Option("", help="Why, kept with the attempt's summary")):
+    """Live dry run: end this attempt and start a fresh real-size wallet (the running bot picks it up)."""
+    import json as _json
+
+    from solmeme.config import load_settings
+    from solmeme.sim.dryrun import REQUEST_FILE
+
+    s = load_settings()
+    path = s.data_dir / "session" / REQUEST_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_json.dumps({"action": "new_attempt", "why": why}), encoding="utf-8")
+    console.print("asked the running bot to start a new live attempt (within a few seconds)")
+
+
+@app.command()
+def demote(strategy: str, reason: str = typer.Option("manual", help="Why, kept in the version note")):
+    """Move a champion off the shared wallet: it keeps trading as a trial on its own wallet."""
+    from solmeme.ai.promoter import Promoter
+
+    s, store = _ctx()
+    v = Promoter(s, store).demote(strategy, reason)
+    console.print(f"{strategy}@{v} is now a trial (own wallet). Undo: solmeme promote {strategy} {v}")
+
+
 @app.command()
 def kill(strategy: str, version: str):
     """Stop a running challenger."""
@@ -838,6 +1101,49 @@ def report(days: float = typer.Option(7)):
     s, store = _ctx()
     out = daily_report(s, store, days)
     console.print(f"report → {out}")
+
+
+@app.command()
+def session(minutes: Optional[float] = typer.Option(None, help="Look back N minutes (default: --every, else ai.session_review.every_min)"),
+            every: Optional[float] = typer.Option(None, help="Repeat every N minutes until Ctrl+C"),
+            ai: Optional[str] = typer.Option(None, help="claude | local | none (default: ai.session_review.provider)"),
+            force_ai: bool = typer.Option(False, "--force-ai", help="Ask the AI even when nothing changed")):
+    """Report on the running bot: wallet, trades, problems; an AI note only when something changed."""
+    from rich.markdown import Markdown
+
+    from solmeme.ai.session_review import PROVIDERS, review_once, write_schedule
+    from solmeme.reports.session import load_live
+
+    s, store = _ctx()
+    cfg = s.ai.session_review
+    provider = (ai or cfg.provider).lower()
+    if provider not in PROVIDERS:
+        console.print(f"[red]--ai must be one of {', '.join(PROVIDERS)}[/red]")
+        raise typer.Exit(2)
+    look = minutes or every or cfg.every_min
+    while True:
+        started = time.time()
+        out = review_once(s, store, look, provider, force_ai=force_ai)
+        console.print(Markdown(out.text))
+        console.print(f"[dim]→ {out.path} · {out.ai_status}[/dim]")
+        if not every:
+            return
+        nxt = started + every * 60
+        seen_run = out.report.run_id
+        write_schedule(s, nxt, every)
+        console.print(f"[dim]next report at {datetime.fromtimestamp(nxt).strftime('%H:%M')} (Ctrl+C to stop)[/dim]\n")
+        while time.time() < nxt:
+            time.sleep(min(30.0, max(1.0, nxt - time.time())))
+            snap, _ = load_live(s)
+            run = (snap or {}).get("run_id")
+            if run and run != seen_run and not snap.get("ended"):
+                seen_run = run                    # a new bot run: report on it one interval after it started
+                first = float(snap.get("started") or time.time()) + every * 60
+                if first < nxt:
+                    nxt = first
+                    write_schedule(s, nxt, every)
+                console.print(f"[dim]new run {run}: first report at "
+                              f"{datetime.fromtimestamp(nxt).strftime('%H:%M')}[/dim]")
 
 
 if __name__ == "__main__":

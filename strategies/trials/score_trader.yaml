@@ -1,0 +1,83 @@
+id: score_trader
+description: >
+  Trade on a confidence score instead of an all-or-nothing rule list (Oct 10, your idea): every signal we
+  have adds points when it holds, a red flag takes points away, and missing data adds nothing instead of
+  blocking the trade. Buy at min_score points; the bet grows up to 2x as the score nears its maximum.
+  Hard vetoes stay gates: a fresh price we could actually buy at (pump.fun trade stream or GMGN, not a
+  Dexscreener snapshot), the rug check, plus the global filter (socials, banned wallets, dev dumped...).
+  Every weight and the buy line are params, so the swarm evolves what matters from the trades.
+  Starting weights fitted on Oct 10 00:00-04:30 (2,726 gated buys, ridge regression on return), tested on
+  04:30-08:00: 68 trades, 31% won, -0.2%/SOL (hand-set weights: -5%; kol_follow same hours: +0%). Only
+  smart money, KOLs and a clean dev carried signal; 80+ holders was the worst (-64%: late), socials,
+  narrative and callouts were noise. Zero-weight terms stay so the swarm can turn them back on.
+universe: {stage: any, max_age_s: 7200}
+entry:
+  triggers: [curve_trade, pool_trade, wallet_trade, signal, enrichment]
+  all:
+    - {id: fresh_price, f: secs_since_trusted_price, op: "<", v: 30, locked: true}
+    - {id: small, f: mcap_usd, op: "<", v: $max_mcap_usd}
+  none:
+    - {id: rug, f: hard_rug, op: "==", v: true, locked: true}
+    - {id: our_rug_check, f: chain_rug_flags, op: ">=", v: 2, locked: true}
+  min_score: $min_score
+  score:
+    # who is in
+    - {id: kol_in, f: kol_buys_600s, op: ">=", v: 1, w: $w_kol}
+    - {id: whales_in, f: whale_buys, op: ">=", v: 1, w: $w_whale}
+    - {id: smart_money, f: gmgn_smart_degen_count, op: ">=", v: 2, w: $w_smart}
+    # holders
+    - {id: holders, f: gmgn_holders, op: ">=", v: $min_holders, w: $w_holders}
+    - {id: holders_stream, f: holders_est, op: ">=", v: $min_holders, w: $w_holders_stream}
+    - {id: spread_out, f: top10_pct, op: "<=", v: 30, w: $w_spread}
+    # flow right now
+    - {id: buyers_60s, f: unique_buyers_60s, op: ">=", v: $min_buyers_60s, w: $w_buyers}
+    - {id: buy_pressure, f: buy_sell_ratio_60s, op: ">=", v: 1.5, w: $w_pressure}
+    - {id: climbing, f: price_chg_300s_pct, op: between, v: [10, 150], w: $w_climb}
+    # attention
+    - {id: callouts, f: pump_callouts, op: ">=", v: 2, w: $w_callouts}
+    - {id: trending, f: pump_trending_rank, op: "<=", v: 20, w: $w_trending}
+    - {id: socials, f: owned_socials_count, op: ">=", v: 2, w: $w_socials}
+    - {id: narrative, f: tweet_match_30m, op: ">=", v: 1, w: $w_narrative}
+    # dev
+    - {id: clean_dev, f: dev_prior_rugs, op: "==", v: 0, w: $w_clean_dev}
+    # red flags take points away
+    - {id: dev_selling, f: dev_sold_pct, op: ">=", v: 40, w: $w_dev_selling}
+    - {id: whales_leaving, f: whale_sells, op: ">=", v: 2, w: $w_whales_leaving}
+    - {id: kols_leaving, f: kol_sells, op: ">=", v: 1, w: $w_kols_leaving}
+    - {id: bundled, f: gmgn_bundler_rate, op: ">=", v: 0.3, w: $w_bundled}
+    - {id: fading, f: dd_from_ath_pct, op: ">=", v: 40, w: $w_fading}
+sizing: {sol: 0.1, max_open: 5, max_entries_per_token: 1, score_x: 2.0}
+exits:
+  take_profit: [{at_x: 2.0, sell_pct: 50}, {at_x: 4.0, sell_pct: 100}]
+  stop_loss_pct: $sl
+  trailing_pct: 30
+  trailing_activate_x: 1.5
+  max_hold_s: 1800
+  stale_after_s: 600
+  on_rug: true
+  on_kol_sell: true
+params:
+  min_score: {value: 3, lo: 1, hi: 10}
+  max_mcap_usd: {value: 150000, lo: 10000, hi: 2000000}
+  min_holders: {value: 80, lo: 20, hi: 400, type: int}
+  min_buyers_60s: {value: 8, lo: 2, hi: 40, type: int}
+  w_kol: {value: 1.44, lo: 0, hi: 5}
+  w_whale: {value: 0.0, lo: 0, hi: 5}
+  w_smart: {value: 0.69, lo: 0, hi: 4}
+  w_holders: {value: 0.0, lo: 0, hi: 5}
+  w_holders_stream: {value: 0.0, lo: 0, hi: 4}
+  w_spread: {value: 0.27, lo: 0, hi: 3}
+  w_buyers: {value: 0.33, lo: 0, hi: 4}
+  w_pressure: {value: 0.0, lo: 0, hi: 3}
+  w_climb: {value: 0.08, lo: 0, hi: 3}
+  w_callouts: {value: 0.0, lo: 0, hi: 3}
+  w_trending: {value: 0.06, lo: 0, hi: 3}
+  w_socials: {value: 0.0, lo: 0, hi: 2}
+  w_narrative: {value: 0.0, lo: 0, hi: 2}
+  w_clean_dev: {value: 2.0, lo: 0, hi: 2}
+  w_dev_selling: {value: 0.0, lo: -5, hi: 0}
+  w_whales_leaving: {value: 0.0, lo: -5, hi: 0}
+  w_kols_leaving: {value: 0.0, lo: -5, hi: 0}
+  w_bundled: {value: 0.0, lo: -5, hi: 0}
+  w_fading: {value: -0.86, lo: -5, hi: 0}
+  sl: {value: 30, lo: 10, hi: 60}

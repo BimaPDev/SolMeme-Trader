@@ -253,6 +253,8 @@ def normalize_pump(item: dict) -> dict | None:
         "website": (item.get("website") or "").strip() or None,
         "telegram": (item.get("telegram") or "").strip() or None,
         "creator": item.get("creator") or "",
+        # already trading in a pool: pump.fun keeps some long-migrated coins marked not complete
+        "pooled": bool(item.get("pump_swap_pool") or item.get("raydium_pool")),
     }
 
 
@@ -272,15 +274,12 @@ def pump_as_info(row: dict) -> dict:
 def pump_lists(payloads: dict[str, list], limit: int) -> dict[str, list[dict]]:
     out: dict[str, list[dict]] = {}
     for name, raw in payloads.items():
-        rows = []
-        for item in raw or []:
-            row = normalize_pump(item)
-            if not row:
-                continue
-            rows.append(row)
-            if len(rows) >= limit:
-                break
-        out[name] = rows
+        rows = [row for row in map(normalize_pump, raw or []) if row]
+        if name == "almost":
+            # still on the curve, closest to graduating first
+            rows = [r for r in rows if not r["pooled"] and r["bonding_pct"] is not None and r["bonding_pct"] < 100]
+            rows.sort(key=lambda r: -r["bonding_pct"])
+        out[name] = rows[:limit]
     return out
 
 
@@ -413,13 +412,15 @@ async def snapshot(req=None, *, now: float, per_column: int = 8, trending_limit:
     pump: dict[str, list] = {}
     if pump_get is not None:
         payloads = {}
-        for name, sort, complete in (
-            ("new", "created_timestamp", "false"),
-            ("almost", "market_cap", "false"),
-            ("graduated", "created_timestamp", "true"),
+        # almost: sorting unfinished coins by market cap returns years-old coins that migrated long ago,
+        # so take the most recently traded ones and keep those still on the curve (see pump_lists)
+        for name, sort, complete, limit in (
+            ("new", "created_timestamp", "false", per_column),
+            ("almost", "last_trade_timestamp", "false", 50),
+            ("graduated", "created_timestamp", "true", per_column),
         ):
             payloads[name] = await pump_get({
-                "offset": 0, "limit": per_column, "order": "DESC", "includeNsfw": "false",
+                "offset": 0, "limit": limit, "order": "DESC", "includeNsfw": "false",
                 "sort": sort, "complete": complete,
             }) or []
         pump = pump_lists(payloads, per_column)

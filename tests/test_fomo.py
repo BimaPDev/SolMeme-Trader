@@ -121,6 +121,17 @@ def test_leaderboard_followed_set_top_n_and_window(settings):
     assert src.followed.wallets == {W1}
 
 
+def test_other_window_is_used_until_the_configured_one_loads(settings):
+    # fomo.family opens on its 24h board, so a 7d setting must not leave the followed set empty
+    src = make_source(settings, top_n=1, leaderboard="7d", min_usd=20)
+    assert src.on_http(URL_24H, load("leaderboard_alt.json")) == []
+    assert src.followed.wallets == {W2}
+    assert src.on_http(URL_7D, load("leaderboard.json")) == []
+    assert src.followed.wallets == {W1}
+    assert src.on_http(URL_24H, load("leaderboard_alt.json")) == []
+    assert src.followed.wallets == {W1}
+
+
 def test_default_top_n_follows_both(settings):
     src = make_source(settings)
     assert src.on_http(URL_7D, load("leaderboard.json")) == []

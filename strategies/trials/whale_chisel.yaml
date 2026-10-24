@@ -1,0 +1,28 @@
+id: whale_chisel
+description: >
+  Your idea (Oct 11): when 2+ whales from the book bought the same coin in the last 10 minutes and none are
+  selling, buy too and chisel out: a quarter at 1.2x, 1.4x and 1.7x, the rest at 2x, with a 25% stop.
+  Every global rule applies (own socials, not falling, not 3x already, SOL pair...). On 46 such coins
+  (Oct 8-11, today's fees and rules) this plan came out +0.1% and -8.5% per trade in the two halves, better
+  than holding (-7.5%/-18.5%) but not yet profitable, so it runs on paper (honest fills) until it shows a
+  profit; then it can go on the live wallet.
+universe: {stage: any, max_age_s: 21600}
+entry:
+  triggers: [curve_trade, pool_trade, wallet_trade]
+  all:
+    - {id: whales, f: whale_buys, op: ">=", v: $min_whales}
+    - {id: small, f: mcap_sol, op: "<", v: $max_mcap_sol}
+  none:
+    - {id: rug, f: hard_rug, op: "==", v: true, locked: true}
+    - {id: leaving, f: whale_sells, op: ">=", v: 1}
+sizing: {sol: 0.1, max_open: 5, max_entries_per_token: 1}
+exits:
+  take_profit: [{at_x: 1.2, sell_pct: 25}, {at_x: 1.4, sell_pct: 25}, {at_x: 1.7, sell_pct: 25}, {at_x: 2.0, sell_pct: 100}]
+  stop_loss_pct: $sl
+  max_hold_s: 1800
+  stale_after_s: 600
+  on_rug: true
+params:
+  min_whales: {value: 2, lo: 2, hi: 6, type: int}
+  max_mcap_sol: {value: 3000, lo: 100, hi: 20000}
+  sl: {value: 25, lo: 10, hi: 50}

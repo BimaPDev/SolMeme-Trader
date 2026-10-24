@@ -1,0 +1,31 @@
+id: whale_follow
+description: >
+  Follow the whale book (lab/whales.py: wallets that keep buying good coins early and exiting well).
+  Buy when several of them bought the same coin in the last 10 minutes and none are selling yet;
+  their pump.fun trades arrive live from pump.fun's own feed. Added Oct 10 after 5 whales bought SOSI
+  at 04:29 and it ran 3.35x within 7 minutes while no strategy acted on it. A trial: its own paper
+  wallet, judged on live paper trades before anyone promotes it (a replay can't test it honestly,
+  since the whale book was built from the same history).
+universe: {stage: any, max_age_s: 21600}
+entry:
+  triggers: [curve_trade, pool_trade, wallet_trade]
+  all:
+    - {id: whales, f: whale_buys, op: ">=", v: $min_whales}
+    - {id: small, f: mcap_sol, op: "<", v: $max_mcap_sol}
+  none:
+    - {id: rug, f: hard_rug, op: "==", v: true, locked: true}
+    - {id: leaving, f: whale_sells, op: ">=", v: $max_whale_sells}
+sizing: {sol: 0.1, max_open: 5, max_entries_per_token: 1}
+exits:
+  take_profit: [{at_x: 2.0, sell_pct: 50}, {at_x: 4.0, sell_pct: 100}]
+  stop_loss_pct: $sl
+  trailing_pct: 30
+  trailing_activate_x: 1.5
+  max_hold_s: 1800
+  stale_after_s: 600
+  on_rug: true
+params:
+  min_whales: {value: 3, lo: 2, hi: 8, type: int}
+  max_whale_sells: {value: 2, lo: 1, hi: 6, type: int}
+  max_mcap_sol: {value: 3000, lo: 100, hi: 20000}
+  sl: {value: 30, lo: 10, hi: 60}

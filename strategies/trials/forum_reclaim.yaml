@@ -1,0 +1,28 @@
+id: forum_reclaim
+description: >
+  Paper trial. A July 2026 paper-trade writeup said buying the migration print
+  is how curve logic loses, and the unproven alternative is to wait until the
+  post-migration dump exhausts and buy the turn back up. Here: 5-60 minutes
+  after migration, 25-55% off the high, last minute green. Own wallet only.
+universe: {stage: migrated, max_age_s: 86400}
+entry:
+  triggers: [enrichment, pool_trade]
+  all:
+    - {id: waited, f: since_migration_s, op: between, v: [300, 3600]}
+    - {id: dump, f: dd_from_ath_pct, op: between, v: [25, 55]}
+    - {id: turn, f: price_chg_60s_pct, op: ">", v: 0}
+  any:
+    - {id: dexliq, f: dex_liquidity_usd, op: ">=", v: 8000}
+    - {id: gmgnliq, f: gmgn_liquidity_usd, op: ">=", v: 8000}
+  none:
+    - {id: rug, f: hard_rug, op: "==", v: true, locked: true}
+sizing: {sol: 0.1, max_open: 4, max_entries_per_token: 1}
+exits:
+  take_profit: [{at_x: 1.5, sell_pct: 50}, {at_x: 2.5, sell_pct: 100}]
+  stop_loss_pct: 20
+  trailing_pct: 20
+  trailing_activate_x: 1.3
+  max_hold_s: 3600
+  stale_after_s: 300
+  on_rug: true
+params: {}

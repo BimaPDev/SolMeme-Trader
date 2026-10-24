@@ -1,0 +1,25 @@
+id: council_pick
+description: >
+  The council's own buys (the user asked for it to decide "should I buy this", hands-off). Whale clusters
+  (3+ wallets from the whale book buying a coin within 10 minutes) pass the free global filter, then the
+  judges see the full forensics (creator history, on-chain check, holders, buyers, callouts, narrative) and
+  vote buy / wait / avoid (ai/ask.py pick). A clear Buy (60%+ agreement, 2+ judges) arrives as a
+  council_pick signal and this strategy buys it; the live wallet copies it like any champion, and the
+  council reviews the live buy again right after. Exits are plain: half at 2x, the rest at 4x, a trailing
+  stop once up 50%, a 30% stop, 30 minutes at most.
+universe: {stage: any, max_age_s: 86400}
+entry:
+  triggers: [signal]
+  all:
+    - {id: picked, f: council_pick, op: "==", v: true, locked: true}
+  none:
+    - {id: rug, f: hard_rug, op: "==", v: true, locked: true}
+sizing: {sol: 0.1, max_open: 4, max_entries_per_token: 1}
+exits:
+  take_profit: [{at_x: 2.0, sell_pct: 50}, {at_x: 4.0, sell_pct: 100}]
+  stop_loss_pct: 30
+  trailing_pct: 30
+  trailing_activate_x: 1.5
+  max_hold_s: 1800
+  stale_after_s: 600
+  on_rug: true
